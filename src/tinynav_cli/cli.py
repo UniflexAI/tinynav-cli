@@ -11,7 +11,7 @@ from typing_extensions import Annotated
 
 from .version import __version__
 
-DEFAULT_IMAGE = "ghcr.io/uniflexai/tinynav:latest"
+DEFAULT_IMAGE = "uniflexai/tinynav:latest"
 
 
 @dataclass
