@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tinynav-cli"
+name = "tinynav"
 version = "0.0.1"
 description = "CLI for TinyNav"
 readme = "README.md"

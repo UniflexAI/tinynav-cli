@@ -5,7 +5,7 @@ A lightweight command-line interface for TinyNav.
 ## Install
 
 ```bash
-pip install tinynav-cli
+pip install tinynav
 ```
 
 ## Commands

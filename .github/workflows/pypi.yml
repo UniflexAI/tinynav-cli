@@ -42,7 +42,7 @@ jobs:
 
     environment:
       name: pypi
-      url: https://pypi.org/project/tinynav-cli/
+      url: https://pypi.org/project/tinynav/
 
     steps:
       - name: Download distributions
