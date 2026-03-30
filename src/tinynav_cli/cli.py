@@ -20,6 +20,7 @@ class InitCommand:
 
     docker_image: str = DEFAULT_IMAGE
     skip_docker_pull: bool = False
+    yes: bool = False
 
 
 @dataclass
@@ -63,6 +64,11 @@ class CheckResult:
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def _run_streaming(command: list[str]) -> int:
+    completed = subprocess.run(command, check=False)
+    return completed.returncode
 
 
 def _check_docker_installed() -> CheckResult:
@@ -132,15 +138,30 @@ def _print_result(result: CheckResult) -> None:
         print(f"   👉 {result.hint}")
 
 
+def _docker_image_exists(image: str) -> bool:
+    result = _run(["docker", "image", "inspect", image])
+    return result.returncode == 0
+
+
+def _confirm_pull(image: str, assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    if not __import__("sys").stdin.isatty():
+        print(f"Docker image {image} is not present locally. Re-run with --yes to download it automatically.")
+        return False
+    answer = input(f"Docker image {image} is not present locally. Download it now? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
 def _docker_pull(image: str) -> CheckResult:
-    result = _run(["docker", "pull", image])
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "docker pull failed"
+    print(f"Pulling Docker image: {image}")
+    returncode = _run_streaming(["docker", "pull", image])
+    if returncode != 0:
         return CheckResult(
             name="docker-pull",
             ok=False,
             message=f"Failed to pull Docker image {image}.",
-            hint=detail,
+            hint="docker pull returned a non-zero exit code.",
         )
     return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready: {image}")
 
@@ -177,6 +198,14 @@ def run_init(command: InitCommand) -> int:
 
     if command.skip_docker_pull:
         print("⏭️  Skipping docker pull as requested.")
+        return 0
+
+    if _docker_image_exists(command.docker_image):
+        print(f"✅ Docker image already present: {command.docker_image}")
+        return 0
+
+    if not _confirm_pull(command.docker_image, command.yes):
+        print("⏭️  Docker pull skipped.")
         return 0
 
     pull_result = _docker_pull(command.docker_image)
