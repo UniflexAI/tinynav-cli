@@ -3,7 +3,7 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Union
 
 import tyro
@@ -16,7 +16,7 @@ DEFAULT_CONTAINER_NAME = "tinynav"
 
 
 def _default_workspace_dir() -> str:
-    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    data_home = Path(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")))
     return str(data_home / "tinynav")
 
 
@@ -26,7 +26,7 @@ class InitCommand:
 
     docker_image: str = DEFAULT_IMAGE
     container_name: str = DEFAULT_CONTAINER_NAME
-    workspace_dir: str = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")) + "/tinynav"
+    workspace_dir: str = field(default_factory=_default_workspace_dir)
     skip_docker_pull: bool = False
     yes: bool = False
 
