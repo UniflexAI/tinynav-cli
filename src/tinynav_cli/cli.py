@@ -336,6 +336,9 @@ def _docker_run(command: InitCommand) -> CheckResult:
         "-w",
         command.workspace_dir,
         command.docker_image,
+        "bash",
+        "-lc",
+        "sleep infinity",
     ]
     result = _run(docker_command)
     if result.returncode != 0:
