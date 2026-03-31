@@ -431,6 +431,7 @@ def run_example(command: ExampleCommand) -> int:
         [
             "docker",
             "exec",
+            "-it",
             command.container_name,
             "bash",
             "-lc",
