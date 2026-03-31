@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
@@ -83,6 +84,20 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
 def _run_streaming(command: list[str]) -> int:
     completed = subprocess.run(command, check=False)
     return completed.returncode
+
+
+def _read_text_file(path: str) -> str | None:
+    file_path = Path(path)
+    if not file_path.exists():
+        return None
+    return file_path.read_text().strip()
+
+
+def _command_output(command: list[str]) -> str:
+    result = _run(command)
+    if result.returncode != 0:
+        return result.stderr.strip() or result.stdout.strip() or "command failed"
+    return result.stdout.strip()
 
 
 def _check_docker_installed() -> CheckResult:
@@ -218,7 +233,7 @@ def _docker_image_exists(image: str) -> bool:
 def _confirm_pull(image: str, assume_yes: bool) -> bool:
     if assume_yes:
         return True
-    if not __import__("sys").stdin.isatty():
+    if not sys.stdin.isatty():
         print(f"Docker image {image} is not present locally. Re-run with --yes to download it automatically.")
         return False
     answer = input(f"Docker image {image} is not present locally. Download it now? [y/N]: ").strip().lower()
@@ -435,7 +450,10 @@ def run_doctor(command: DoctorCommand) -> int:
 
     print("tinynav doctor report")
     print("====================")
-    print(f"version: {__version__}")
+    print(f"tinynav_cli version: {__version__}")
+    print(f"python version: {platform.python_version()}")
+    uv_version = shutil.which("uv")
+    print(f"uv: {_command_output(['uv', '--version']) if uv_version else 'not found'}")
     print(f"architecture: {platform.machine()}")
     print()
     print("checks:")
@@ -444,6 +462,18 @@ def run_doctor(command: DoctorCommand) -> int:
         print(f"- [{status}] {result.name}: {result.message}")
         if result.hint is not None:
             print(f"    hint: {result.hint}")
+
+    print()
+    print("/etc/lsb-release:")
+    print("-----------------")
+    lsb_release = _read_text_file('/etc/lsb-release')
+    print(lsb_release if lsb_release is not None else 'not found')
+
+    print()
+    print("/etc/nv_tegra_release:")
+    print("----------------------")
+    nv_tegra_release = _read_text_file('/etc/nv_tegra_release')
+    print(nv_tegra_release if nv_tegra_release is not None else 'not found')
 
     print()
     print("docker info:")
