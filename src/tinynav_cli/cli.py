@@ -4,6 +4,7 @@ import getpass
 import grp
 import os
 import platform
+import random
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,7 @@ class InitCommand:
     workspace_dir: str = field(default_factory=_default_workspace_dir)
     skip_docker_pull: bool = False
     yes: bool = False
+    ros_domain_id: int | None = None
     cn_mode: bool = False
 
 
@@ -259,6 +261,24 @@ def _confirm_pull(image: str, assume_yes: bool) -> bool:
     return answer in {"y", "yes"}
 
 
+def _choose_ros_domain_id(current_value: int | None) -> int:
+    if current_value is not None:
+        return current_value
+    default_value = random.randint(1, 101)
+    if not sys.stdin.isatty():
+        return default_value
+    raw = input(f"ROS_DOMAIN_ID [{default_value}]: ").strip()
+    if raw == "":
+        return default_value
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid ROS_DOMAIN_ID: {raw}") from exc
+    if not (0 <= value <= 232):
+        raise SystemExit("ROS_DOMAIN_ID must be between 0 and 232.")
+    return value
+
+
 def _confirm_cn_mirror() -> bool:
     if not sys.stdin.isatty():
         return False
@@ -403,6 +423,8 @@ def _docker_run(command: InitCommand) -> CheckResult:
         f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
         "-e",
         "GDK_SCALE=2",
+        "-e",
+        f"ROS_DOMAIN_ID={command.ros_domain_id}",
         *_cn_env_args(command.cn_mode),
         "-w",
         command.workspace_dir,
@@ -556,6 +578,8 @@ def run_init(command: InitCommand) -> int:
         return 1
 
     _ensure_workspace_dir(command.workspace_dir)
+    command.ros_domain_id = _choose_ros_domain_id(command.ros_domain_id)
+    print(f"Using ROS_DOMAIN_ID={command.ros_domain_id}")
 
     if command.skip_docker_pull:
         print("⏭️  Skipping docker pull as requested.")
