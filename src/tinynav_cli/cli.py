@@ -274,10 +274,8 @@ def _gpu_probe_command(args: list[str]) -> list[str]:
         "--rm",
         *args,
         "--entrypoint",
-        "sh",
+        "nvidia-smi",
         DEFAULT_IMAGE,
-        "-lc",
-        "exit 0",
     ]
 
 
