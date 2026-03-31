@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import getpass
+import grp
+import os
 import platform
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Union
 
 import tyro
@@ -12,6 +16,12 @@ from typing_extensions import Annotated
 from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
+DEFAULT_CONTAINER_NAME = "tinynav_cli"
+
+
+def _default_workspace_dir() -> str:
+    data_home = Path(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")))
+    return str(data_home / "tinynav")
 
 
 @dataclass
@@ -19,6 +29,8 @@ class InitCommand:
     """Initialize the local TinyNav CLI workspace."""
 
     docker_image: str = DEFAULT_IMAGE
+    container_name: str = DEFAULT_CONTAINER_NAME
+    workspace_dir: str = field(default_factory=_default_workspace_dir)
     skip_docker_pull: bool = False
     yes: bool = False
 
@@ -26,6 +38,8 @@ class InitCommand:
 @dataclass
 class DoctorCommand:
     """Inspect the local environment and report common setup issues."""
+
+    verbose: bool = False
 
 
 @dataclass
@@ -82,6 +96,30 @@ def _check_docker_installed() -> CheckResult:
     return CheckResult(name="docker", ok=True, message="Docker is installed.")
 
 
+def _check_docker_group() -> CheckResult:
+    try:
+        docker_group = grp.getgrnam("docker")
+    except KeyError:
+        return CheckResult(
+            name="docker-group",
+            ok=False,
+            message="docker group does not exist on this machine.",
+            hint="Create or reinstall Docker so the docker group is available.",
+        )
+
+    current_user = getpass.getuser()
+    current_gid = os.getgid()
+    if current_gid == docker_group.gr_gid or current_user in docker_group.gr_mem:
+        return CheckResult(name="docker-group", ok=True, message="Current user is in the docker group.")
+
+    return CheckResult(
+        name="docker-group",
+        ok=False,
+        message="Current user is not in the docker group.",
+        hint=f"Run: sudo usermod -aG docker {current_user} && newgrp docker",
+    )
+
+
 def _check_docker_access() -> CheckResult:
     result = _run(["docker", "info"])
     if result.returncode != 0:
@@ -131,6 +169,40 @@ def _check_architecture() -> CheckResult:
     return CheckResult(name="architecture", ok=True, message=f"{platform.machine()} platform detected.")
 
 
+def _collect_prerequisite_results() -> list[CheckResult]:
+    docker_installed = _check_docker_installed()
+    results = [docker_installed]
+    if docker_installed.ok:
+        results.append(_check_docker_group())
+    else:
+        results.append(
+            CheckResult(
+                name="docker-group",
+                ok=False,
+                message="Skipped docker group check because Docker is not installed.",
+            )
+        )
+
+    docker_access = _check_docker_access()
+    results.append(docker_access)
+    if docker_access.ok:
+        results.append(_check_nvidia_runtime())
+    else:
+        results.append(
+            CheckResult(
+                name="docker-nvidia-runtime",
+                ok=False,
+                message="Skipped NVIDIA runtime check because Docker is not ready.",
+            )
+        )
+
+    results.extend([
+        _check_git_lfs(),
+        _check_architecture(),
+    ])
+    return results
+
+
 def _print_result(result: CheckResult) -> None:
     prefix = "✅" if result.ok else "❌"
     print(f"{prefix} {result.message}")
@@ -166,25 +238,155 @@ def _docker_pull(image: str) -> CheckResult:
     return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready: {image}")
 
 
-def run_init(command: InitCommand) -> int:
-    results = [
-        _check_docker_installed(),
-        _check_docker_access(),
+def _gpu_probe_command(args: list[str]) -> list[str]:
+    return [
+        "docker",
+        "run",
+        "--rm",
+        *args,
+        "--entrypoint",
+        "sh",
+        DEFAULT_IMAGE,
+        "-lc",
+        "exit 0",
     ]
-    if all(result.ok for result in results):
-        results.append(_check_nvidia_runtime())
-    else:
-        results.append(
-            CheckResult(
-                name="docker-nvidia-runtime",
-                ok=False,
-                message="Skipped NVIDIA runtime check because Docker is not ready.",
-            )
+
+
+def _detect_gpu_run_args() -> tuple[list[str], str | None]:
+    candidates = [
+        (["--device", "nvidia.com/gpu=all"], "cdi"),
+        (["--gpus", "all"], "gpus"),
+        (["--runtime", "nvidia"], "runtime"),
+    ]
+    for args, name in candidates:
+        result = _run(_gpu_probe_command(args))
+        if result.returncode == 0:
+            return args, name
+    return [], None
+
+
+def _workspace_mount_arg(workspace_dir: str) -> list[str]:
+    return ["-v", f"{Path(workspace_dir).expanduser()}:{workspace_dir}"]
+
+
+def _ensure_workspace_dir(workspace_dir: str) -> None:
+    Path(workspace_dir).expanduser().mkdir(parents=True, exist_ok=True)
+
+
+def _container_exists(name: str) -> bool:
+    result = _run(["docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}"])
+    return result.returncode == 0 and any(line.strip() == name for line in result.stdout.splitlines())
+
+
+def _remove_container(name: str) -> CheckResult:
+    result = _run(["docker", "rm", "-f", name])
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker rm failed"
+        return CheckResult(
+            name="docker-rm",
+            ok=False,
+            message=f"Failed to remove existing container {name}.",
+            hint=detail,
         )
-    results.extend([
-        _check_git_lfs(),
-        _check_architecture(),
-    ])
+    return CheckResult(name="docker-rm", ok=True, message=f"Removed existing container {name}.")
+
+
+def _docker_run(command: InitCommand) -> CheckResult:
+    if _container_exists(command.container_name):
+        remove_result = _remove_container(command.container_name)
+        _print_result(remove_result)
+        if not remove_result.ok:
+            return remove_result
+
+    gpu_args, gpu_mode = _detect_gpu_run_args()
+    if gpu_mode is None:
+        return CheckResult(
+            name="docker-gpu",
+            ok=False,
+            message="Failed to determine a working Docker GPU mode.",
+            hint="Tried CDI (--device nvidia.com/gpu=all), --gpus all, and --runtime nvidia.",
+        )
+
+    print(f"Using GPU mode: {gpu_mode}")
+
+    docker_command = [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        command.container_name,
+        *gpu_args,
+        "--privileged",
+        "--network",
+        "host",
+        "-v",
+        "/tmp/.X11-unix:/tmp/.X11-unix",
+        "-v",
+        "/dev:/dev",
+        "-v",
+        "/etc/localtime:/etc/localtime",
+        "--device-cgroup-rule=c 81:* rwm",
+        "--device-cgroup-rule=c 234:* rwm",
+        "--shm-size=16gb",
+        *_workspace_mount_arg(command.workspace_dir),
+        "-e",
+        f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
+        "-e",
+        "GDK_SCALE=2",
+        "-w",
+        command.workspace_dir,
+        "--entrypoint",
+        "",
+        command.docker_image,
+        "tail",
+        "-f",
+        "/dev/null",
+    ]
+    result = _run(docker_command)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
+        return CheckResult(
+            name="docker-run",
+            ok=False,
+            message=f"Failed to start container {command.container_name}.",
+            hint=detail,
+        )
+    container_id = result.stdout.strip().splitlines()[0] if result.stdout.strip() else command.container_name
+    return CheckResult(name="docker-run", ok=True, message=f"Container {command.container_name} started ({container_id[:12]}).")
+
+
+def _build_models(command: InitCommand) -> CheckResult:
+    print("Building TensorRT models inside the container...")
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            command.container_name,
+            "bash",
+            "-lc",
+            "cd /tinynav/tinynav/models && make all",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        return CheckResult(
+            name="model-build",
+            ok=False,
+            message="Failed to build TensorRT models inside the container.",
+            hint="See the console output above for the make failure details.",
+        )
+    return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
+
+
+def _docker_info_text() -> str:
+    result = _run(["docker", "info"])
+    if result.returncode != 0:
+        return result.stderr.strip() or result.stdout.strip() or "docker info failed"
+    return result.stdout.strip()
+
+
+def run_init(command: InitCommand) -> int:
+    results = _collect_prerequisite_results()
 
     failures = 0
     for result in results:
@@ -196,21 +398,69 @@ def run_init(command: InitCommand) -> int:
         print(f"\ninit failed: {failures} prerequisite check(s) failed.")
         return 1
 
+    _ensure_workspace_dir(command.workspace_dir)
+
     if command.skip_docker_pull:
         print("⏭️  Skipping docker pull as requested.")
         return 0
 
     if _docker_image_exists(command.docker_image):
-        print(f"✅ Docker image already present: {command.docker_image}")
-        return 0
-
-    if not _confirm_pull(command.docker_image, command.yes):
-        print("⏭️  Docker pull skipped.")
-        return 0
+        print(f"ℹ️  Docker image already present locally: {command.docker_image}")
+        if not command.yes and not _confirm_pull(command.docker_image, True):
+            print("⏭️  Docker pull skipped.")
+            return 0
+    else:
+        if not _confirm_pull(command.docker_image, command.yes):
+            print("⏭️  Docker pull skipped.")
+            return 0
 
     pull_result = _docker_pull(command.docker_image)
     _print_result(pull_result)
-    return 0 if pull_result.ok else 1
+    if not pull_result.ok:
+        return 1
+
+    run_result = _docker_run(command)
+    _print_result(run_result)
+    if not run_result.ok:
+        return 1
+
+    build_result = _build_models(command)
+    _print_result(build_result)
+    return 0 if build_result.ok else 1
+
+
+def run_doctor(command: DoctorCommand) -> int:
+    results = _collect_prerequisite_results()
+    failures = sum(1 for result in results if not result.ok)
+
+    print("tinynav doctor report")
+    print("====================")
+    print(f"version: {__version__}")
+    print(f"architecture: {platform.machine()}")
+    print()
+    print("checks:")
+    for result in results:
+        status = "PASS" if result.ok else "FAIL"
+        print(f"- [{status}] {result.name}: {result.message}")
+        if result.hint is not None:
+            print(f"    hint: {result.hint}")
+
+    print()
+    print("docker info:")
+    print("------------")
+    docker_info = _docker_info_text()
+    if command.verbose:
+        print(docker_info)
+    else:
+        lines = docker_info.splitlines()
+        for line in lines[:20]:
+            print(line)
+        if len(lines) > 20:
+            print("... (use --verbose for full docker info)")
+
+    print()
+    print(f"summary: {len(results) - failures} passed, {failures} failed")
+    return 0 if failures == 0 else 1
 
 
 def run(command: Command) -> int:
@@ -218,7 +468,7 @@ def run(command: Command) -> int:
         case InitCommand():
             return run_init(command)
         case DoctorCommand():
-            print("tinynav doctor: not implemented yet")
+            return run_doctor(command)
         case NavCommand():
             print("tinynav nav: not implemented yet")
         case MapBuildCommand():
