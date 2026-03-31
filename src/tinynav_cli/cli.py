@@ -56,6 +56,11 @@ class ExampleCommand:
 
 
 @dataclass
+class VersionCommand:
+    """Print the tinynav CLI version."""
+
+
+@dataclass
 class MapBuildCommand:
     """Build a map."""
 
@@ -73,8 +78,9 @@ Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
 Nav = Annotated[NavCommand, tyro.conf.subcommand(name="nav")]
 Example = Annotated[ExampleCommand, tyro.conf.subcommand(name="example")]
+Version = Annotated[VersionCommand, tyro.conf.subcommand(name="version")]
 Map = Annotated[MapCommand, tyro.conf.subcommand(name="map")]
-Command = Union[Init, Doctor, Nav, Example, Map]
+Command = Union[Init, Doctor, Nav, Example, Version, Map]
 
 
 @dataclass
@@ -421,6 +427,11 @@ def _run_xhost_local() -> CheckResult:
     return CheckResult(name="xhost", ok=True, message="Enabled local X11 access with xhost +local:*.")
 
 
+def run_version(command: VersionCommand) -> int:
+    print(f"tinynav {__version__}")
+    return 0
+
+
 def run_example(command: ExampleCommand) -> int:
     ensure_result = _ensure_example_container_running(command.container_name)
     _print_result(ensure_result)
@@ -592,6 +603,8 @@ def run(command: Command) -> int:
             print("tinynav nav: not implemented yet")
         case ExampleCommand():
             return run_example(command)
+        case VersionCommand():
+            return run_version(command)
         case MapBuildCommand():
             print("tinynav map build: not implemented yet")
         case MapListCommand():
