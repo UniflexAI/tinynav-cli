@@ -176,11 +176,31 @@ def _docker_pull(image: str) -> CheckResult:
     return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready: {image}")
 
 
-def _gpu_run_args() -> list[str]:
-    arch = platform.machine().lower()
-    if arch in {"aarch64", "arm64"} or arch.startswith("arm"):
-        return ["--runtime", "nvidia"]
-    return ["--gpus", "all"]
+def _gpu_probe_command(args: list[str]) -> list[str]:
+    return [
+        "docker",
+        "run",
+        "--rm",
+        *args,
+        "--entrypoint",
+        "sh",
+        DEFAULT_IMAGE,
+        "-lc",
+        "exit 0",
+    ]
+
+
+def _detect_gpu_run_args() -> tuple[list[str], str | None]:
+    candidates = [
+        (["--device", "nvidia.com/gpu=all"], "cdi"),
+        (["--gpus", "all"], "gpus"),
+        (["--runtime", "nvidia"], "runtime"),
+    ]
+    for args, name in candidates:
+        result = _run(_gpu_probe_command(args))
+        if result.returncode == 0:
+            return args, name
+    return [], None
 
 
 def _workspace_mount_arg(workspace_dir: str) -> list[str]:
@@ -216,13 +236,24 @@ def _docker_run(command: InitCommand) -> CheckResult:
         if not remove_result.ok:
             return remove_result
 
+    gpu_args, gpu_mode = _detect_gpu_run_args()
+    if gpu_mode is None:
+        return CheckResult(
+            name="docker-gpu",
+            ok=False,
+            message="Failed to determine a working Docker GPU mode.",
+            hint="Tried CDI (--device nvidia.com/gpu=all), --gpus all, and --runtime nvidia.",
+        )
+
+    print(f"Using GPU mode: {gpu_mode}")
+
     docker_command = [
         "docker",
         "run",
         "-d",
         "--name",
         command.container_name,
-        *_gpu_run_args(),
+        *gpu_args,
         "--privileged",
         "--network",
         "host",
