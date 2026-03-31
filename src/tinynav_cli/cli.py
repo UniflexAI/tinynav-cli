@@ -541,7 +541,11 @@ def run_init(command: InitCommand) -> int:
 
     build_result = _build_models(command)
     _print_result(build_result)
-    return 0 if build_result.ok else 1
+    if not build_result.ok:
+        return 1
+
+    print("\nNext step: start with `tinynav example`.")
+    return 0
 
 
 def run_doctor(command: DoctorCommand) -> int:
