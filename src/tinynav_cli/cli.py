@@ -49,6 +49,18 @@ class NavCommand:
 
 
 @dataclass
+class ExampleCommand:
+    """Run the rosbag example workflow inside the tinynav container."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class VersionCommand:
+    """Print the tinynav CLI version."""
+
+
+@dataclass
 class MapBuildCommand:
     """Build a map."""
 
@@ -65,8 +77,10 @@ MapCommand = Union[MapBuild, MapList]
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
 Nav = Annotated[NavCommand, tyro.conf.subcommand(name="nav")]
+Example = Annotated[ExampleCommand, tyro.conf.subcommand(name="example")]
+Version = Annotated[VersionCommand, tyro.conf.subcommand(name="version")]
 Map = Annotated[MapCommand, tyro.conf.subcommand(name="map")]
-Command = Union[Init, Doctor, Nav, Map]
+Command = Union[Init, Doctor, Nav, Example, Version, Map]
 
 
 @dataclass
@@ -393,6 +407,92 @@ def _build_models(command: InitCommand) -> CheckResult:
     return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
 
 
+def _run_xhost_local() -> CheckResult:
+    if shutil.which("xhost") is None:
+        return CheckResult(
+            name="xhost",
+            ok=False,
+            message="xhost is not installed.",
+            hint="Install x11-xserver-utils or run the command manually before tinynav example.",
+        )
+    result = _run(["xhost", "+local:*"])
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "xhost failed"
+        return CheckResult(
+            name="xhost",
+            ok=False,
+            message="Failed to run xhost +local:*.",
+            hint=detail,
+        )
+    return CheckResult(name="xhost", ok=True, message="Enabled local X11 access with xhost +local:*.")
+
+
+def run_version(command: VersionCommand) -> int:
+    print(f"tinynav {__version__}")
+    return 0
+
+
+def run_example(command: ExampleCommand) -> int:
+    ensure_result = _ensure_example_container_running(command.container_name)
+    _print_result(ensure_result)
+    if not ensure_result.ok:
+        return 1
+
+    xhost_result = _run_xhost_local()
+    _print_result(xhost_result)
+    if not xhost_result.ok:
+        return 1
+
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-it",
+            command.container_name,
+            "bash",
+            "-lc",
+            "bash /tinynav/scripts/run_rosbag_examples.sh",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        print("❌ Failed to launch tinynav example workflow inside the container.")
+        print(f"   👉 Make sure the container {command.container_name} is running and initialized.")
+        return 1
+
+    print(f"✅ Started rosbag example workflow inside container {command.container_name}.")
+    return 0
+
+
+def _container_running(name: str) -> bool:
+    result = _run(["docker", "ps", "--filter", f"name=^{name}$", "--format", "{{.Names}}"])
+    return result.returncode == 0 and any(line.strip() == name for line in result.stdout.splitlines())
+
+
+def _ensure_example_container_running(name: str) -> CheckResult:
+    if _container_running(name):
+        return CheckResult(name="example-container", ok=True, message=f"Container {name} is already running.")
+
+    if _container_exists(name):
+        result = _run(["docker", "start", name])
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "docker start failed"
+            return CheckResult(
+                name="example-container",
+                ok=False,
+                message=f"Failed to start existing container {name}.",
+                hint=detail,
+            )
+        return CheckResult(name="example-container", ok=True, message=f"Started existing container {name}.")
+
+    return CheckResult(
+        name="example-container",
+        ok=False,
+        message=f"Container {name} does not exist.",
+        hint="Run `tinynav init` first.",
+    )
+
+
 def _docker_info_text() -> str:
     result = _run(["docker", "info"])
     if result.returncode != 0:
@@ -441,7 +541,11 @@ def run_init(command: InitCommand) -> int:
 
     build_result = _build_models(command)
     _print_result(build_result)
-    return 0 if build_result.ok else 1
+    if not build_result.ok:
+        return 1
+
+    print("\nNext step: start with `tinynav example`.")
+    return 0
 
 
 def run_doctor(command: DoctorCommand) -> int:
@@ -501,6 +605,10 @@ def run(command: Command) -> int:
             return run_doctor(command)
         case NavCommand():
             print("tinynav nav: not implemented yet")
+        case ExampleCommand():
+            return run_example(command)
+        case VersionCommand():
+            return run_version(command)
         case MapBuildCommand():
             print("tinynav map build: not implemented yet")
         case MapListCommand():
