@@ -8,11 +8,15 @@ import random
 import shutil
 import subprocess
 import sys
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
 
 import tyro
+from rich.live import Live
+from rich.panel import Panel
+from rich.text import Text
 from typing_extensions import Annotated
 
 from .version import __version__
@@ -451,7 +455,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
 
 def _build_models(command: InitCommand) -> CheckResult:
     print("Building TensorRT models inside the container...")
-    result = subprocess.run(
+    process = subprocess.Popen(
         [
             "docker",
             "exec",
@@ -460,73 +464,28 @@ def _build_models(command: InitCommand) -> CheckResult:
             "-lc",
             "cd /tinynav/tinynav/models && make all",
         ],
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
-    if result.returncode != 0:
+    lines = deque(maxlen=12)
+    with Live(refresh_per_second=8, transient=True) as live:
+        assert process.stdout is not None
+        for line in process.stdout:
+            lines.append(line.rstrip())
+            rendered = "\n".join(lines) if lines else "Waiting for build output..."
+            live.update(Panel(Text(rendered), title="make all (latest output)"))
+    returncode = process.wait()
+    if returncode != 0:
+        detail = "\n".join(lines) if lines else "model build failed"
         return CheckResult(
             name="model-build",
             ok=False,
             message="Failed to build TensorRT models inside the container.",
-            hint="See the console output above for the make failure details.",
-        )
-    return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
-
-
-def _run_xhost_local() -> CheckResult:
-    if shutil.which("xhost") is None:
-        return CheckResult(
-            name="xhost",
-            ok=False,
-            message="xhost is not installed.",
-            hint="Install x11-xserver-utils or run the command manually before tinynav example.",
-        )
-    result = _run(["xhost", "+local:*"])
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "xhost failed"
-        return CheckResult(
-            name="xhost",
-            ok=False,
-            message="Failed to run xhost +local:*.",
             hint=detail,
         )
-    return CheckResult(name="xhost", ok=True, message="Enabled local X11 access with xhost +local:*.")
-
-
-def run_version(command: VersionCommand) -> int:
-    print(f"tinynav {__version__}")
-    return 0
-
-
-def run_example(command: ExampleCommand) -> int:
-    ensure_result = _ensure_example_container_running(command.container_name)
-    _print_result(ensure_result)
-    if not ensure_result.ok:
-        return 1
-
-    xhost_result = _run_xhost_local()
-    _print_result(xhost_result)
-    if not xhost_result.ok:
-        return 1
-
-    result = subprocess.run(
-        [
-            "docker",
-            "exec",
-            "-it",
-            command.container_name,
-            "bash",
-            "-lc",
-            "bash /tinynav/scripts/run_rosbag_examples.sh",
-        ],
-        check=False,
-    )
-    if result.returncode != 0:
-        print("❌ Failed to launch tinynav example workflow inside the container.")
-        print(f"   👉 Make sure the container {command.container_name} is running and initialized.")
-        return 1
-
-    print(f"✅ Started rosbag example workflow inside container {command.container_name}.")
-    return 0
+    return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
 
 
 def _container_running(name: str) -> bool:
