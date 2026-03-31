@@ -13,7 +13,11 @@ from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
 DEFAULT_CONTAINER_NAME = "tinynav"
-DEFAULT_WORKSPACE_DIR = "/tinynav"
+
+
+def _default_workspace_dir() -> str:
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return str(data_home / "tinynav")
 
 
 @dataclass
@@ -22,7 +26,7 @@ class InitCommand:
 
     docker_image: str = DEFAULT_IMAGE
     container_name: str = DEFAULT_CONTAINER_NAME
-    workspace_dir: str = DEFAULT_WORKSPACE_DIR
+    workspace_dir: str = _default_workspace_dir()
     skip_docker_pull: bool = False
     yes: bool = False
 
@@ -178,7 +182,11 @@ def _gpu_run_args() -> list[str]:
 
 
 def _workspace_mount_arg(workspace_dir: str) -> list[str]:
-    return ["-v", f"{Path.cwd()}:{workspace_dir}"]
+    return ["-v", f"{Path(workspace_dir).expanduser()}:{workspace_dir}"]
+
+
+def _ensure_workspace_dir(workspace_dir: str) -> None:
+    Path(workspace_dir).expanduser().mkdir(parents=True, exist_ok=True)
 
 
 def _container_exists(name: str) -> bool:
@@ -276,6 +284,8 @@ def run_init(command: InitCommand) -> int:
     if failures > 0:
         print(f"\ninit failed: {failures} prerequisite check(s) failed.")
         return 1
+
+    _ensure_workspace_dir(command.workspace_dir)
 
     if command.skip_docker_pull:
         print("⏭️  Skipping docker pull as requested.")
