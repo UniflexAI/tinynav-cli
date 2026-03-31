@@ -17,6 +17,10 @@ from typing_extensions import Annotated
 from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
+CN_MIRROR_IMAGE = "docker.1ms.run/uniflexai/tinynav:latest"
+CN_HF_ENDPOINT = "https://hf-mirror.com"
+CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
+CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 
 
@@ -34,6 +38,7 @@ class InitCommand:
     workspace_dir: str = field(default_factory=_default_workspace_dir)
     skip_docker_pull: bool = False
     yes: bool = False
+    cn_mode: bool = False
 
 
 @dataclass
@@ -254,6 +259,32 @@ def _confirm_pull(image: str, assume_yes: bool) -> bool:
     return answer in {"y", "yes"}
 
 
+def _confirm_cn_mirror() -> bool:
+    if not sys.stdin.isatty():
+        return False
+    answer = input("Use the CN mirror (docker.1ms.run) and CN-optimized environment settings? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+def _pull_image_with_optional_cn_mirror(image: str, use_cn_mirror: bool) -> CheckResult:
+    source_image = CN_MIRROR_IMAGE if use_cn_mirror else image
+    pull_result = _docker_pull(source_image)
+    if not pull_result.ok:
+        return pull_result
+    if use_cn_mirror:
+        tag_result = _run(["docker", "tag", source_image, image])
+        if tag_result.returncode != 0:
+            detail = tag_result.stderr.strip() or tag_result.stdout.strip() or "docker tag failed"
+            return CheckResult(
+                name="docker-tag",
+                ok=False,
+                message=f"Failed to tag {source_image} as {image}.",
+                hint=detail,
+            )
+        return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready via CN mirror: {image}")
+    return pull_result
+
+
 def _docker_pull(image: str) -> CheckResult:
     print(f"Pulling Docker image: {image}")
     returncode = _run_streaming(["docker", "pull", image])
@@ -320,6 +351,16 @@ def _remove_container(name: str) -> CheckResult:
     return CheckResult(name="docker-rm", ok=True, message=f"Removed existing container {name}.")
 
 
+def _cn_env_args(enabled: bool) -> list[str]:
+    if not enabled:
+        return []
+    return [
+        "-e", f"HF_ENDPOINT={CN_HF_ENDPOINT}",
+        "-e", f"PIP_INDEX_URL={CN_PIP_INDEX_URL}",
+        "-e", f"PIP_TRUSTED_HOST={CN_PIP_TRUSTED_HOST}",
+    ]
+
+
 def _docker_run(command: InitCommand) -> CheckResult:
     if _container_exists(command.container_name):
         remove_result = _remove_container(command.container_name)
@@ -362,6 +403,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
         "-e",
         "GDK_SCALE=2",
+        *_cn_env_args(command.cn_mode),
         "-w",
         command.workspace_dir,
         "--entrypoint",
@@ -529,7 +571,9 @@ def run_init(command: InitCommand) -> int:
             print("⏭️  Docker pull skipped.")
             return 0
 
-    pull_result = _docker_pull(command.docker_image)
+    use_cn_mirror = _confirm_cn_mirror()
+    command.cn_mode = use_cn_mirror
+    pull_result = _pull_image_with_optional_cn_mirror(command.docker_image, use_cn_mirror)
     _print_result(pull_result)
     if not pull_result.ok:
         return 1
