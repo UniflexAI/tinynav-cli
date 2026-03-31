@@ -12,6 +12,8 @@ from typing_extensions import Annotated
 from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
+DEFAULT_CONTAINER_NAME = "tinynav"
+DEFAULT_WORKSPACE_DIR = "/tinynav"
 
 
 @dataclass
@@ -19,6 +21,8 @@ class InitCommand:
     """Initialize the local TinyNav CLI workspace."""
 
     docker_image: str = DEFAULT_IMAGE
+    container_name: str = DEFAULT_CONTAINER_NAME
+    workspace_dir: str = DEFAULT_WORKSPACE_DIR
     skip_docker_pull: bool = False
     yes: bool = False
 
@@ -166,6 +170,83 @@ def _docker_pull(image: str) -> CheckResult:
     return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready: {image}")
 
 
+def _gpu_run_args() -> list[str]:
+    arch = platform.machine().lower()
+    if arch in {"aarch64", "arm64"} or arch.startswith("arm"):
+        return ["--runtime", "nvidia"]
+    return ["--gpus", "all"]
+
+
+def _workspace_mount_arg(workspace_dir: str) -> list[str]:
+    return ["-v", f"{Path.cwd()}:{workspace_dir}"]
+
+
+def _container_exists(name: str) -> bool:
+    result = _run(["docker", "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}"])
+    return result.returncode == 0 and any(line.strip() == name for line in result.stdout.splitlines())
+
+
+def _remove_container(name: str) -> CheckResult:
+    result = _run(["docker", "rm", "-f", name])
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker rm failed"
+        return CheckResult(
+            name="docker-rm",
+            ok=False,
+            message=f"Failed to remove existing container {name}.",
+            hint=detail,
+        )
+    return CheckResult(name="docker-rm", ok=True, message=f"Removed existing container {name}.")
+
+
+def _docker_run(command: InitCommand) -> CheckResult:
+    if _container_exists(command.container_name):
+        remove_result = _remove_container(command.container_name)
+        _print_result(remove_result)
+        if not remove_result.ok:
+            return remove_result
+
+    docker_command = [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        command.container_name,
+        *_gpu_run_args(),
+        "--privileged",
+        "--network",
+        "host",
+        "-v",
+        "/tmp/.X11-unix:/tmp/.X11-unix",
+        "-v",
+        "/dev:/dev",
+        "-v",
+        "/etc/localtime:/etc/localtime",
+        "--device-cgroup-rule=c 81:* rwm",
+        "--device-cgroup-rule=c 234:* rwm",
+        "--shm-size=16gb",
+        *_workspace_mount_arg(command.workspace_dir),
+        "-e",
+        f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
+        "-e",
+        "GDK_SCALE=2",
+        "-w",
+        command.workspace_dir,
+        command.docker_image,
+    ]
+    result = _run(docker_command)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
+        return CheckResult(
+            name="docker-run",
+            ok=False,
+            message=f"Failed to start container {command.container_name}.",
+            hint=detail,
+        )
+    container_id = result.stdout.strip().splitlines()[0] if result.stdout.strip() else command.container_name
+    return CheckResult(name="docker-run", ok=True, message=f"Container {command.container_name} started ({container_id[:12]}).")
+
+
 def run_init(command: InitCommand) -> int:
     results = [
         _check_docker_installed(),
@@ -202,15 +283,19 @@ def run_init(command: InitCommand) -> int:
 
     if _docker_image_exists(command.docker_image):
         print(f"✅ Docker image already present: {command.docker_image}")
-        return 0
+    else:
+        if not _confirm_pull(command.docker_image, command.yes):
+            print("⏭️  Docker pull skipped.")
+            return 0
 
-    if not _confirm_pull(command.docker_image, command.yes):
-        print("⏭️  Docker pull skipped.")
-        return 0
+        pull_result = _docker_pull(command.docker_image)
+        _print_result(pull_result)
+        if not pull_result.ok:
+            return 1
 
-    pull_result = _docker_pull(command.docker_image)
-    _print_result(pull_result)
-    return 0 if pull_result.ok else 1
+    run_result = _docker_run(command)
+    _print_result(run_result)
+    return 0 if run_result.ok else 1
 
 
 def run(command: Command) -> int:
