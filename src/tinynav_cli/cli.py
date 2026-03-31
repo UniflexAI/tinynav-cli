@@ -267,6 +267,7 @@ def _choose_ros_domain_id(current_value: int | None) -> int:
     default_value = random.randint(1, 101)
     if not sys.stdin.isatty():
         return default_value
+    print("If you do not care about ROS_DOMAIN_ID, just press Enter to use the suggested random value.")
     raw = input(f"ROS_DOMAIN_ID [{default_value}]: ").strip()
     if raw == "":
         return default_value
