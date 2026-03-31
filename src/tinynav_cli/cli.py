@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import grp
+import os
 import platform
 import shutil
 import subprocess
@@ -80,6 +82,30 @@ def _check_docker_installed() -> CheckResult:
             hint="Install it with: sudo apt-get update && sudo apt-get install -y docker.io",
         )
     return CheckResult(name="docker", ok=True, message="Docker is installed.")
+
+
+def _check_docker_group() -> CheckResult:
+    try:
+        docker_group = grp.getgrnam("docker")
+    except KeyError:
+        return CheckResult(
+            name="docker-group",
+            ok=False,
+            message="docker group does not exist on this machine.",
+            hint="Create or reinstall Docker so the docker group is available.",
+        )
+
+    current_user = __import__("getpass").getuser()
+    current_gid = os.getgid()
+    if current_gid == docker_group.gr_gid or current_user in docker_group.gr_mem:
+        return CheckResult(name="docker-group", ok=True, message="Current user is in the docker group.")
+
+    return CheckResult(
+        name="docker-group",
+        ok=False,
+        message="Current user is not in the docker group.",
+        hint=f"Run: sudo usermod -aG docker {current_user} && newgrp docker",
+    )
 
 
 def _check_docker_access() -> CheckResult:
@@ -167,10 +193,19 @@ def _docker_pull(image: str) -> CheckResult:
 
 
 def run_init(command: InitCommand) -> int:
-    results = [
-        _check_docker_installed(),
-        _check_docker_access(),
-    ]
+    docker_installed = _check_docker_installed()
+    results = [docker_installed]
+    if docker_installed.ok:
+        results.append(_check_docker_group())
+    else:
+        results.append(
+            CheckResult(
+                name="docker-group",
+                ok=False,
+                message="Skipped docker group check because Docker is not installed.",
+            )
+        )
+    results.append(_check_docker_access())
     if all(result.ok for result in results):
         results.append(_check_nvidia_runtime())
     else:
