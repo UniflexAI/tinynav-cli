@@ -250,6 +250,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
     docker_command = [
         "docker",
         "run",
+        "-i",
         "-d",
         "--name",
         command.container_name,
@@ -275,7 +276,13 @@ def _docker_run(command: InitCommand) -> CheckResult:
         command.workspace_dir,
         command.docker_image,
     ]
-    result = _run(docker_command)
+    result = subprocess.run(
+        docker_command,
+        input="y\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
         return CheckResult(
