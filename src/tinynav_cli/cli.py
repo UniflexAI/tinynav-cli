@@ -17,6 +17,7 @@ from typing_extensions import Annotated
 from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
+CN_MIRROR_IMAGE = "docker.1ms.run/uniflexai/tinynav:latest"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 
 
@@ -252,6 +253,32 @@ def _confirm_pull(image: str, assume_yes: bool) -> bool:
         return False
     answer = input(f"Docker image {image} is not present locally. Download it now? [y/N]: ").strip().lower()
     return answer in {"y", "yes"}
+
+
+def _confirm_cn_mirror() -> bool:
+    if not sys.stdin.isatty():
+        return False
+    answer = input("Use the CN mirror (docker.1ms.run) to pull the image? [y/N]: ").strip().lower()
+    return answer in {"y", "yes"}
+
+
+def _pull_image_with_optional_cn_mirror(image: str, use_cn_mirror: bool) -> CheckResult:
+    source_image = CN_MIRROR_IMAGE if use_cn_mirror else image
+    pull_result = _docker_pull(source_image)
+    if not pull_result.ok:
+        return pull_result
+    if use_cn_mirror:
+        tag_result = _run(["docker", "tag", source_image, image])
+        if tag_result.returncode != 0:
+            detail = tag_result.stderr.strip() or tag_result.stdout.strip() or "docker tag failed"
+            return CheckResult(
+                name="docker-tag",
+                ok=False,
+                message=f"Failed to tag {source_image} as {image}.",
+                hint=detail,
+            )
+        return CheckResult(name="docker-pull", ok=True, message=f"Docker image ready via CN mirror: {image}")
+    return pull_result
 
 
 def _docker_pull(image: str) -> CheckResult:
@@ -529,7 +556,8 @@ def run_init(command: InitCommand) -> int:
             print("⏭️  Docker pull skipped.")
             return 0
 
-    pull_result = _docker_pull(command.docker_image)
+    use_cn_mirror = _confirm_cn_mirror()
+    pull_result = _pull_image_with_optional_cn_mirror(command.docker_image, use_cn_mirror)
     _print_result(pull_result)
     if not pull_result.ok:
         return 1
