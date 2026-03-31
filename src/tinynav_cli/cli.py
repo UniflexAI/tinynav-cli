@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import getpass
+import grp
 import os
 import platform
 import shutil
@@ -36,6 +38,8 @@ class InitCommand:
 @dataclass
 class DoctorCommand:
     """Inspect the local environment and report common setup issues."""
+
+    verbose: bool = False
 
 
 @dataclass
@@ -92,6 +96,30 @@ def _check_docker_installed() -> CheckResult:
     return CheckResult(name="docker", ok=True, message="Docker is installed.")
 
 
+def _check_docker_group() -> CheckResult:
+    try:
+        docker_group = grp.getgrnam("docker")
+    except KeyError:
+        return CheckResult(
+            name="docker-group",
+            ok=False,
+            message="docker group does not exist on this machine.",
+            hint="Create or reinstall Docker so the docker group is available.",
+        )
+
+    current_user = getpass.getuser()
+    current_gid = os.getgid()
+    if current_gid == docker_group.gr_gid or current_user in docker_group.gr_mem:
+        return CheckResult(name="docker-group", ok=True, message="Current user is in the docker group.")
+
+    return CheckResult(
+        name="docker-group",
+        ok=False,
+        message="Current user is not in the docker group.",
+        hint=f"Run: sudo usermod -aG docker {current_user} && newgrp docker",
+    )
+
+
 def _check_docker_access() -> CheckResult:
     result = _run(["docker", "info"])
     if result.returncode != 0:
@@ -139,6 +167,40 @@ def _check_architecture() -> CheckResult:
     if arch in {"aarch64", "arm64"} or arch.startswith("arm"):
         return CheckResult(name="architecture", ok=True, message="ARM platform detected.")
     return CheckResult(name="architecture", ok=True, message=f"{platform.machine()} platform detected.")
+
+
+def _collect_prerequisite_results() -> list[CheckResult]:
+    docker_installed = _check_docker_installed()
+    results = [docker_installed]
+    if docker_installed.ok:
+        results.append(_check_docker_group())
+    else:
+        results.append(
+            CheckResult(
+                name="docker-group",
+                ok=False,
+                message="Skipped docker group check because Docker is not installed.",
+            )
+        )
+
+    docker_access = _check_docker_access()
+    results.append(docker_access)
+    if docker_access.ok:
+        results.append(_check_nvidia_runtime())
+    else:
+        results.append(
+            CheckResult(
+                name="docker-nvidia-runtime",
+                ok=False,
+                message="Skipped NVIDIA runtime check because Docker is not ready.",
+            )
+        )
+
+    results.extend([
+        _check_git_lfs(),
+        _check_architecture(),
+    ])
+    return results
 
 
 def _print_result(result: CheckResult) -> None:
@@ -288,25 +350,35 @@ def _docker_run(command: InitCommand) -> CheckResult:
     return CheckResult(name="docker-run", ok=True, message=f"Container {command.container_name} started ({container_id[:12]}).")
 
 
-def run_init(command: InitCommand) -> int:
-    results = [
-        _check_docker_installed(),
-        _check_docker_access(),
-    ]
-    if all(result.ok for result in results):
-        results.append(_check_nvidia_runtime())
-    else:
-        results.append(
-            CheckResult(
-                name="docker-nvidia-runtime",
-                ok=False,
-                message="Skipped NVIDIA runtime check because Docker is not ready.",
-            )
-        )
-    results.extend([
-        _check_git_lfs(),
-        _check_architecture(),
+def _build_models(command: InitCommand) -> CheckResult:
+    result = _run([
+        "docker",
+        "exec",
+        command.container_name,
+        "bash",
+        "-lc",
+        "cd /tinynav/tinynav/models && make all",
     ])
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "model build failed"
+        return CheckResult(
+            name="model-build",
+            ok=False,
+            message="Failed to build TensorRT models inside the container.",
+            hint=detail,
+        )
+    return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
+
+
+def _docker_info_text() -> str:
+    result = _run(["docker", "info"])
+    if result.returncode != 0:
+        return result.stderr.strip() or result.stdout.strip() or "docker info failed"
+    return result.stdout.strip()
+
+
+def run_init(command: InitCommand) -> int:
+    results = _collect_prerequisite_results()
 
     failures = 0
     for result in results:
@@ -346,12 +418,46 @@ def run_init(command: InitCommand) -> int:
     return 0 if build_result.ok else 1
 
 
+def run_doctor(command: DoctorCommand) -> int:
+    results = _collect_prerequisite_results()
+    failures = sum(1 for result in results if not result.ok)
+
+    print("tinynav doctor report")
+    print("====================")
+    print(f"version: {__version__}")
+    print(f"architecture: {platform.machine()}")
+    print()
+    print("checks:")
+    for result in results:
+        status = "PASS" if result.ok else "FAIL"
+        print(f"- [{status}] {result.name}: {result.message}")
+        if result.hint is not None:
+            print(f"    hint: {result.hint}")
+
+    print()
+    print("docker info:")
+    print("------------")
+    docker_info = _docker_info_text()
+    if command.verbose:
+        print(docker_info)
+    else:
+        lines = docker_info.splitlines()
+        for line in lines[:20]:
+            print(line)
+        if len(lines) > 20:
+            print("... (use --verbose for full docker info)")
+
+    print()
+    print(f"summary: {len(results) - failures} passed, {failures} failed")
+    return 0 if failures == 0 else 1
+
+
 def run(command: Command) -> int:
     match command:
         case InitCommand():
             return run_init(command)
         case DoctorCommand():
-            print("tinynav doctor: not implemented yet")
+            return run_doctor(command)
         case NavCommand():
             print("tinynav nav: not implemented yet")
         case MapBuildCommand():
