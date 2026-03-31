@@ -402,16 +402,19 @@ def run_init(command: InitCommand) -> int:
         return 0
 
     if _docker_image_exists(command.docker_image):
-        print(f"✅ Docker image already present: {command.docker_image}")
+        print(f"ℹ️  Docker image already present locally: {command.docker_image}")
+        if not command.yes and not _confirm_pull(command.docker_image, True):
+            print("⏭️  Docker pull skipped.")
+            return 0
     else:
         if not _confirm_pull(command.docker_image, command.yes):
             print("⏭️  Docker pull skipped.")
             return 0
 
-        pull_result = _docker_pull(command.docker_image)
-        _print_result(pull_result)
-        if not pull_result.ok:
-            return 1
+    pull_result = _docker_pull(command.docker_image)
+    _print_result(pull_result)
+    if not pull_result.ok:
+        return 1
 
     run_result = _docker_run(command)
     _print_result(run_result)
