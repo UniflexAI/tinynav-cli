@@ -356,21 +356,24 @@ def _docker_run(command: InitCommand) -> CheckResult:
 
 
 def _build_models(command: InitCommand) -> CheckResult:
-    result = _run([
-        "docker",
-        "exec",
-        command.container_name,
-        "bash",
-        "-lc",
-        "cd /tinynav/tinynav/models && make all",
-    ])
+    print("Building TensorRT models inside the container...")
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            command.container_name,
+            "bash",
+            "-lc",
+            "cd /tinynav/tinynav/models && make all",
+        ],
+        check=False,
+    )
     if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "model build failed"
         return CheckResult(
             name="model-build",
             ok=False,
             message="Failed to build TensorRT models inside the container.",
-            hint=detail,
+            hint="See the console output above for the make failure details.",
         )
     return CheckResult(name="model-build", ok=True, message="TensorRT models built successfully.")
 
