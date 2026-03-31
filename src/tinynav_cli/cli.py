@@ -422,6 +422,11 @@ def _run_xhost_local() -> CheckResult:
 
 
 def run_example(command: ExampleCommand) -> int:
+    ensure_result = _ensure_example_container_running(command.container_name)
+    _print_result(ensure_result)
+    if not ensure_result.ok:
+        return 1
+
     xhost_result = _run_xhost_local()
     _print_result(xhost_result)
     if not xhost_result.ok:
@@ -446,6 +451,35 @@ def run_example(command: ExampleCommand) -> int:
 
     print(f"✅ Started rosbag example workflow inside container {command.container_name}.")
     return 0
+
+
+def _container_running(name: str) -> bool:
+    result = _run(["docker", "ps", "--filter", f"name=^{name}$", "--format", "{{.Names}}"])
+    return result.returncode == 0 and any(line.strip() == name for line in result.stdout.splitlines())
+
+
+def _ensure_example_container_running(name: str) -> CheckResult:
+    if _container_running(name):
+        return CheckResult(name="example-container", ok=True, message=f"Container {name} is already running.")
+
+    if _container_exists(name):
+        result = _run(["docker", "start", name])
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "docker start failed"
+            return CheckResult(
+                name="example-container",
+                ok=False,
+                message=f"Failed to start existing container {name}.",
+                hint=detail,
+            )
+        return CheckResult(name="example-container", ok=True, message=f"Started existing container {name}.")
+
+    return CheckResult(
+        name="example-container",
+        ok=False,
+        message=f"Container {name} does not exist.",
+        hint="Run `tinynav init` first.",
+    )
 
 
 def _docker_info_text() -> str:
