@@ -335,10 +335,12 @@ def _docker_run(command: InitCommand) -> CheckResult:
         "GDK_SCALE=2",
         "-w",
         command.workspace_dir,
+        "--entrypoint",
+        "",
         command.docker_image,
-        "bash",
-        "-lc",
-        "sleep infinity",
+        "tail",
+        "-f",
+        "/dev/null",
     ]
     result = _run(docker_command)
     if result.returncode != 0:
