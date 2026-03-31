@@ -26,7 +26,7 @@ class InitCommand:
 
     docker_image: str = DEFAULT_IMAGE
     container_name: str = DEFAULT_CONTAINER_NAME
-    workspace_dir: str = _default_workspace_dir()
+    workspace_dir: str = os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")) + "/tinynav"
     skip_docker_pull: bool = False
     yes: bool = False
 
