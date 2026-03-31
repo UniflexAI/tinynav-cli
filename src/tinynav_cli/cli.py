@@ -18,6 +18,9 @@ from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
 CN_MIRROR_IMAGE = "docker.1ms.run/uniflexai/tinynav:latest"
+CN_HF_ENDPOINT = "https://hf-mirror.com"
+CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
+CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 
 
@@ -35,6 +38,7 @@ class InitCommand:
     workspace_dir: str = field(default_factory=_default_workspace_dir)
     skip_docker_pull: bool = False
     yes: bool = False
+    cn_mode: bool = False
 
 
 @dataclass
@@ -258,7 +262,7 @@ def _confirm_pull(image: str, assume_yes: bool) -> bool:
 def _confirm_cn_mirror() -> bool:
     if not sys.stdin.isatty():
         return False
-    answer = input("Use the CN mirror (docker.1ms.run) to pull the image? [y/N]: ").strip().lower()
+    answer = input("Use the CN mirror (docker.1ms.run) and CN-optimized environment settings? [y/N]: ").strip().lower()
     return answer in {"y", "yes"}
 
 
@@ -347,6 +351,16 @@ def _remove_container(name: str) -> CheckResult:
     return CheckResult(name="docker-rm", ok=True, message=f"Removed existing container {name}.")
 
 
+def _cn_env_args(enabled: bool) -> list[str]:
+    if not enabled:
+        return []
+    return [
+        "-e", f"HF_ENDPOINT={CN_HF_ENDPOINT}",
+        "-e", f"PIP_INDEX_URL={CN_PIP_INDEX_URL}",
+        "-e", f"PIP_TRUSTED_HOST={CN_PIP_TRUSTED_HOST}",
+    ]
+
+
 def _docker_run(command: InitCommand) -> CheckResult:
     if _container_exists(command.container_name):
         remove_result = _remove_container(command.container_name)
@@ -389,6 +403,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
         "-e",
         "GDK_SCALE=2",
+        *_cn_env_args(command.cn_mode),
         "-w",
         command.workspace_dir,
         "--entrypoint",
@@ -557,6 +572,7 @@ def run_init(command: InitCommand) -> int:
             return 0
 
     use_cn_mirror = _confirm_cn_mirror()
+    command.cn_mode = use_cn_mirror
     pull_result = _pull_image_with_optional_cn_mirror(command.docker_image, use_cn_mirror)
     _print_result(pull_result)
     if not pull_result.ok:
