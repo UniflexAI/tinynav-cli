@@ -250,7 +250,6 @@ def _docker_run(command: InitCommand) -> CheckResult:
     docker_command = [
         "docker",
         "run",
-        "-i",
         "-d",
         "--name",
         command.container_name,
@@ -276,13 +275,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         command.workspace_dir,
         command.docker_image,
     ]
-    result = subprocess.run(
-        docker_command,
-        input="y\n",
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = _run(docker_command)
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "docker run failed"
         return CheckResult(
@@ -345,7 +338,12 @@ def run_init(command: InitCommand) -> int:
 
     run_result = _docker_run(command)
     _print_result(run_result)
-    return 0 if run_result.ok else 1
+    if not run_result.ok:
+        return 1
+
+    build_result = _build_models(command)
+    _print_result(build_result)
+    return 0 if build_result.ok else 1
 
 
 def run(command: Command) -> int:
