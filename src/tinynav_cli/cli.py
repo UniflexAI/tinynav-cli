@@ -22,7 +22,7 @@ from typing_extensions import Annotated
 from .version import __version__
 
 DEFAULT_IMAGE = "uniflexai/tinynav:latest"
-CN_MIRROR_IMAGE = "docker.1ms.run/uniflexai/tinynav:latest"
+CN_MIRROR_IMAGE = "5c7c62600f1f8ae01acce9399f1f59ba.d.1ms.run/uniflexai/tinynav:latest"
 CN_HF_ENDPOINT = "https://hf-mirror.com"
 CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
