@@ -27,6 +27,7 @@ CN_HF_ENDPOINT = "https://hf-mirror.com"
 CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
+CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
 
 
 def _default_workspace_dir() -> str:
@@ -353,7 +354,7 @@ def _detect_gpu_run_args() -> tuple[list[str], str | None]:
 
 
 def _workspace_mount_arg(workspace_dir: str) -> list[str]:
-    return ["-v", f"{Path(workspace_dir).expanduser()}:{workspace_dir}"]
+    return ["-v", f"{Path(workspace_dir).expanduser()}:{CONTAINER_WORKSPACE_DIR}"]
 
 
 def _ensure_workspace_dir(workspace_dir: str) -> None:
@@ -434,7 +435,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         f"ROS_DOMAIN_ID={command.ros_domain_id}",
         *_cn_env_args(command.cn_mode),
         "-w",
-        command.workspace_dir,
+        CONTAINER_WORKSPACE_DIR,
         "--entrypoint",
         "",
         command.docker_image,
