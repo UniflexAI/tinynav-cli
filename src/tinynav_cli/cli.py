@@ -328,6 +328,8 @@ def _gpu_probe_command(args: list[str]) -> list[str]:
         "docker",
         "run",
         "--rm",
+        "--network",
+        "host",
         *args,
         "--entrypoint",
         "sh",
