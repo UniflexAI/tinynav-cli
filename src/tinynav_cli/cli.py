@@ -99,14 +99,16 @@ MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapBuild, MapList]
 
-SensorList = Annotated[SensorListCommand, tyro.conf.subcommand(name="list")]
+SensorSubcommand = Union[
+    Annotated[SensorListCommand, tyro.conf.subcommand(name="list")],
+]
 
 
 @dataclass
 class SensorCommand:
     """Inspect connected sensors."""
 
-    command: SensorList
+    command: SensorSubcommand
 
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
