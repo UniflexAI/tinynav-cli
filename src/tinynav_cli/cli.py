@@ -59,6 +59,8 @@ class DoctorCommand:
 class NavCommand:
     """Run a navigation task."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
 
 @dataclass
 class ExampleCommand:
@@ -76,10 +78,21 @@ class VersionCommand:
 class MapBuildCommand:
     """Build a map."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
 
 @dataclass
 class MapListCommand:
     """List known maps."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class SensorsCommand:
+    """List detected sensors."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
 
 
 MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
@@ -92,7 +105,8 @@ Nav = Annotated[NavCommand, tyro.conf.subcommand(name="nav")]
 Example = Annotated[ExampleCommand, tyro.conf.subcommand(name="example")]
 Version = Annotated[VersionCommand, tyro.conf.subcommand(name="version")]
 Map = Annotated[MapCommand, tyro.conf.subcommand(name="map")]
-Command = Union[Init, Doctor, Nav, Example, Version, Map]
+Sensors = Annotated[SensorsCommand, tyro.conf.subcommand(name="sensors")]
+Command = Union[Init, Doctor, Nav, Example, Version, Map, Sensors]
 
 
 @dataclass
@@ -632,8 +646,100 @@ def _ensure_example_container_running(name: str) -> CheckResult:
     )
 
 
+def _docker_exec_output(container_name: str, shell_command: str) -> subprocess.CompletedProcess[str]:
+    return _run([
+        "docker",
+        "exec",
+        container_name,
+        "bash",
+        "-lc",
+        shell_command,
+    ])
+
+
+def _list_realsense_sensor(container_name: str) -> CheckResult:
+    result = _docker_exec_output(container_name, "rs-enumerate-devices -s")
+    output = (result.stdout or "") + (result.stderr or "")
+    if result.returncode != 0:
+        detail = output.strip() or "rs-enumerate-devices failed"
+        return CheckResult(
+            name="realsense",
+            ok=False,
+            message="Failed to inspect RealSense devices.",
+            hint=detail,
+        )
+    if "No device detected. Is it plugged in?" in output:
+        return CheckResult(name="realsense", ok=False, message="RealSense sensor not detected.")
+
+    lines = [line.rstrip() for line in output.splitlines() if line.strip()]
+    data_lines = [line for line in lines if not line.lstrip().startswith(tuple(str(i).zfill(2) for i in range(13))) and "ERROR" not in line and not line.startswith("Device Name")]
+    device_line = next((line for line in data_lines if "Intel RealSense" in line), None)
+    message = "RealSense sensor detected."
+    if device_line is not None:
+        message = f"RealSense sensor detected: {device_line.strip()}"
+    return CheckResult(name="realsense", ok=True, message=message)
+
+
+def _list_looper_sensor(container_name: str) -> CheckResult:
+    result = _docker_exec_output(container_name, "source /opt/ros/*/setup.bash >/dev/null 2>&1 && ros2 node list")
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    if result.returncode != 0:
+        return CheckResult(
+            name="looper",
+            ok=False,
+            message="Failed to inspect ROS 2 nodes for looper.",
+            hint=output or "ros2 node list failed",
+        )
+    nodes = [line.strip() for line in output.splitlines() if line.strip()]
+    if any(node == "/looper" or node.endswith("/looper") or node == "looper" for node in nodes):
+        return CheckResult(name="looper", ok=True, message="Looper sensor detected.")
+    return CheckResult(name="looper", ok=False, message="Looper sensor not detected.")
+
+
+def _ensure_runtime_container(name: str) -> bool:
+    ensure_result = _ensure_example_container_running(name)
+    _print_result(ensure_result)
+    return ensure_result.ok
+
+
 def run_version(command: VersionCommand) -> int:
     print(f"tinynav {__version__}")
+    return 0
+
+
+def run_nav(command: NavCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav nav: not implemented yet")
+    return 0
+
+
+def run_map_build(command: MapBuildCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav map build: not implemented yet")
+    return 0
+
+
+def run_map_list(command: MapListCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav map list: not implemented yet")
+    return 0
+
+
+def run_sensors(command: SensorsCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+
+    results = [
+        _list_realsense_sensor(command.container_name),
+        _list_looper_sensor(command.container_name),
+    ]
+    print("tinynav sensors")
+    print("===============")
+    for result in results:
+        _print_result(result)
     return 0
 
 
@@ -725,15 +831,17 @@ def run(command: Command) -> int:
         case DoctorCommand():
             return run_doctor(command)
         case NavCommand():
-            print("tinynav nav: not implemented yet")
+            return run_nav(command)
         case ExampleCommand():
             return run_example(command)
         case VersionCommand():
             return run_version(command)
         case MapBuildCommand():
-            print("tinynav map build: not implemented yet")
+            return run_map_build(command)
         case MapListCommand():
-            print("tinynav map list: not implemented yet")
+            return run_map_list(command)
+        case SensorsCommand():
+            return run_sensors(command)
         case _:
             raise AssertionError(f"unsupported command: {command!r}")
     return 0
