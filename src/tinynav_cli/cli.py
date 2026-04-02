@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Union
 
 import tyro
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -863,10 +864,13 @@ def run(command: Command) -> int:
 
 def main() -> None:
     if sys.argv[1:] == ["sensor"]:
-        print("tinynav sensor")
-        print("==============")
-        print("Available subcommands:")
-        print("- list")
-        raise SystemExit(0)
+        Console(stderr=True).print(
+            Panel(
+                "Expected one of {list}.\n\nFor full helptext, run tinynav sensor --help",
+                title="Missing subcommand",
+                expand=False,
+            )
+        )
+        raise SystemExit(2)
     command = tyro.cli(Command, description=f"tinynav CLI v{__version__}")
     raise SystemExit(run(command))

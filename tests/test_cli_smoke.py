@@ -67,6 +67,6 @@ def test_sensor_help_runs() -> None:
 
 def test_sensor_group_runs() -> None:
     result = run_cli("sensor")
-    assert result.returncode == 0
-    assert "Available subcommands" in output_text(result)
+    assert result.returncode == 2
+    assert "Missing subcommand" in output_text(result)
     assert "list" in output_text(result)
