@@ -862,5 +862,11 @@ def run(command: Command) -> int:
 
 
 def main() -> None:
+    if sys.argv[1:] == ["sensor"]:
+        print("tinynav sensor")
+        print("==============")
+        print("Available subcommands:")
+        print("- list")
+        raise SystemExit(0)
     command = tyro.cli(Command, description=f"tinynav CLI v{__version__}")
     raise SystemExit(run(command))
