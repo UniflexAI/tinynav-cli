@@ -100,7 +100,14 @@ MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapBuild, MapList]
 
 SensorList = Annotated[SensorListCommand, tyro.conf.subcommand(name="list")]
-SensorCommand = Union[SensorList]
+
+
+@dataclass
+class SensorCommand:
+    """Inspect connected sensors."""
+
+    command: SensorList
+
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -843,6 +850,8 @@ def run(command: Command) -> int:
             return run_map_build(command)
         case MapListCommand():
             return run_map_list(command)
+        case SensorCommand():
+            return run(command.command)
         case SensorListCommand():
             return run_sensor_list(command)
         case _:
