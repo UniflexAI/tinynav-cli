@@ -100,7 +100,7 @@ MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapBuild, MapList]
 
 SensorList = Annotated[SensorListCommand, tyro.conf.subcommand(name="list")]
-SensorCommand = SensorList
+SensorCommand = Union[SensorList]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
