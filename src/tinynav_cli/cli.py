@@ -266,13 +266,15 @@ def _confirm_pull(image: str, assume_yes: bool) -> bool:
     return answer in {"y", "yes"}
 
 
-def _choose_ros_domain_id(current_value: int | None) -> int:
+def _choose_ros_domain_id(current_value: int | None) -> int | None:
     if current_value is not None:
         return current_value
-    default_value = random.randint(1, 101)
     if not sys.stdin.isatty():
-        return default_value
-    print("If you do not care about ROS_DOMAIN_ID, just press Enter to use the suggested random value.")
+        return None
+    answer = input("Do you want to specify ROS_DOMAIN_ID? [y/N]: ").strip().lower()
+    if answer not in {"y", "yes"}:
+        return None
+    default_value = random.randint(1, 101)
     raw = input(f"ROS_DOMAIN_ID [{default_value}]: ").strip()
     if raw == "":
         return default_value
@@ -431,8 +433,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         f"DISPLAY={os.environ.get('DISPLAY', ':0')}",
         "-e",
         "GDK_SCALE=2",
-        "-e",
-        f"ROS_DOMAIN_ID={command.ros_domain_id}",
+        *([] if command.ros_domain_id is None else ["-e", f"ROS_DOMAIN_ID={command.ros_domain_id}"]),
         *_cn_env_args(command.cn_mode),
         "-w",
         CONTAINER_WORKSPACE_DIR,
@@ -542,7 +543,10 @@ def run_init(command: InitCommand) -> int:
 
     _ensure_workspace_dir(command.workspace_dir)
     command.ros_domain_id = _choose_ros_domain_id(command.ros_domain_id)
-    print(f"Using ROS_DOMAIN_ID={command.ros_domain_id}")
+    if command.ros_domain_id is None:
+        print("ROS_DOMAIN_ID not specified; container will use its default behavior.")
+    else:
+        print(f"Using ROS_DOMAIN_ID={command.ros_domain_id}")
 
     if command.skip_docker_pull:
         print("⏭️  Skipping docker pull as requested.")
