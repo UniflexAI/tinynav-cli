@@ -17,6 +17,7 @@ tinynav example
 tinynav nav
 tinynav map build
 tinynav map list
+tinynav sensors
 tinynav version
 ```
 
@@ -40,4 +41,5 @@ tinynav example
 - `tinynav init` prepares the container environment and builds models.
 - `tinynav doctor` prints a machine report for debugging.
 - `tinynav example` launches the rosbag example workflow inside the running container.
+- `tinynav sensors` checks connected sensors inside the running container, including RealSense detection and whether a ROS 2 `looper` node is present.
 - `tinynav version` prints the CLI version.
