@@ -57,3 +57,9 @@ def test_map_help_runs() -> None:
     assert result.returncode == 0
     assert "build" in output_text(result)
     assert "list" in output_text(result)
+
+
+def test_sensor_help_runs() -> None:
+    result = run_cli("sensor", "--help")
+    assert result.returncode == 0
+    assert "list" in output_text(result)
