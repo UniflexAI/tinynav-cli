@@ -59,6 +59,8 @@ class DoctorCommand:
 class NavCommand:
     """Run a navigation task."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
 
 @dataclass
 class ExampleCommand:
@@ -76,10 +78,14 @@ class VersionCommand:
 class MapBuildCommand:
     """Build a map."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
 
 @dataclass
 class MapListCommand:
     """List known maps."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
 
 
 @dataclass
@@ -693,15 +699,40 @@ def _list_looper_sensor(container_name: str) -> CheckResult:
     return CheckResult(name="looper", ok=False, message="Looper sensor not detected.")
 
 
+def _ensure_runtime_container(name: str) -> bool:
+    ensure_result = _ensure_example_container_running(name)
+    _print_result(ensure_result)
+    return ensure_result.ok
+
+
 def run_version(command: VersionCommand) -> int:
     print(f"tinynav {__version__}")
     return 0
 
 
+def run_nav(command: NavCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav nav: not implemented yet")
+    return 0
+
+
+def run_map_build(command: MapBuildCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav map build: not implemented yet")
+    return 0
+
+
+def run_map_list(command: MapListCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print("tinynav map list: not implemented yet")
+    return 0
+
+
 def run_sensor_list(command: SensorListCommand) -> int:
-    ensure_result = _ensure_example_container_running(command.container_name)
-    _print_result(ensure_result)
-    if not ensure_result.ok:
+    if not _ensure_runtime_container(command.container_name):
         return 1
 
     results = [
@@ -803,15 +834,15 @@ def run(command: Command) -> int:
         case DoctorCommand():
             return run_doctor(command)
         case NavCommand():
-            print("tinynav nav: not implemented yet")
+            return run_nav(command)
         case ExampleCommand():
             return run_example(command)
         case VersionCommand():
             return run_version(command)
         case MapBuildCommand():
-            print("tinynav map build: not implemented yet")
+            return run_map_build(command)
         case MapListCommand():
-            print("tinynav map list: not implemented yet")
+            return run_map_list(command)
         case SensorListCommand():
             return run_sensor_list(command)
         case _:
