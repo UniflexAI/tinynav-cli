@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Union
 
 import tyro
-from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
@@ -90,7 +89,7 @@ class MapListCommand:
 
 
 @dataclass
-class SensorListCommand:
+class SensorsCommand:
     """List detected sensors."""
 
     container_name: str = DEFAULT_CONTAINER_NAME
@@ -100,26 +99,14 @@ MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapBuild, MapList]
 
-SensorSubcommand = Union[
-    Annotated[SensorListCommand, tyro.conf.subcommand(name="list")],
-]
-
-
-@dataclass
-class SensorCommand:
-    """Inspect connected sensors."""
-
-    command: SensorSubcommand
-
-
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
 Nav = Annotated[NavCommand, tyro.conf.subcommand(name="nav")]
 Example = Annotated[ExampleCommand, tyro.conf.subcommand(name="example")]
 Version = Annotated[VersionCommand, tyro.conf.subcommand(name="version")]
 Map = Annotated[MapCommand, tyro.conf.subcommand(name="map")]
-Sensor = Annotated[SensorCommand, tyro.conf.subcommand(name="sensor")]
-Command = Union[Init, Doctor, Nav, Example, Version, Map, Sensor]
+Sensors = Annotated[SensorsCommand, tyro.conf.subcommand(name="sensors")]
+Command = Union[Init, Doctor, Nav, Example, Version, Map, Sensors]
 
 
 @dataclass
@@ -741,7 +728,7 @@ def run_map_list(command: MapListCommand) -> int:
     return 0
 
 
-def run_sensor_list(command: SensorListCommand) -> int:
+def run_sensors(command: SensorsCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
 
@@ -749,8 +736,8 @@ def run_sensor_list(command: SensorListCommand) -> int:
         _list_realsense_sensor(command.container_name),
         _list_looper_sensor(command.container_name),
     ]
-    print("tinynav sensor list")
-    print("===================")
+    print("tinynav sensors")
+    print("===============")
     for result in results:
         _print_result(result)
     return 0
@@ -853,24 +840,13 @@ def run(command: Command) -> int:
             return run_map_build(command)
         case MapListCommand():
             return run_map_list(command)
-        case SensorCommand():
-            return run(command.command)
-        case SensorListCommand():
-            return run_sensor_list(command)
+        case SensorsCommand():
+            return run_sensors(command)
         case _:
             raise AssertionError(f"unsupported command: {command!r}")
     return 0
 
 
 def main() -> None:
-    if sys.argv[1:] == ["sensor"]:
-        Console(stderr=True).print(
-            Panel(
-                "Expected one of {list}.\n\nFor full helptext, run tinynav sensor --help",
-                title="Missing subcommand",
-                expand=False,
-            )
-        )
-        raise SystemExit(2)
     command = tyro.cli(Command, description=f"tinynav CLI v{__version__}")
     raise SystemExit(run(command))

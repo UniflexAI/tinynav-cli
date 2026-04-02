@@ -59,14 +59,7 @@ def test_map_help_runs() -> None:
     assert "list" in output_text(result)
 
 
-def test_sensor_help_runs() -> None:
-    result = run_cli("sensor", "--help")
+def test_sensors_help_runs() -> None:
+    result = run_cli("sensors", "--help")
     assert result.returncode == 0
-    assert "list" in output_text(result)
-
-
-def test_sensor_group_runs() -> None:
-    result = run_cli("sensor")
-    assert result.returncode == 2
-    assert "Missing subcommand" in output_text(result)
-    assert "list" in output_text(result)
+    assert "container" in output_text(result).lower()
