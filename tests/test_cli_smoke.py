@@ -62,4 +62,6 @@ def test_map_help_runs() -> None:
 def test_sensors_help_runs() -> None:
     result = run_cli("sensors", "--help")
     assert result.returncode == 0
-    assert "container" in output_text(result).lower()
+    text = output_text(result).lower()
+    assert "container" in text
+    assert "preview" in text
