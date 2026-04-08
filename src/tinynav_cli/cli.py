@@ -90,9 +90,10 @@ class MapListCommand:
 
 @dataclass
 class SensorsCommand:
-    """List detected sensors."""
+    """Inspect connected sensors and optionally preview them."""
 
     container_name: str = DEFAULT_CONTAINER_NAME
+    preview: bool = False
 
 
 MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
@@ -691,9 +692,9 @@ def _list_looper_sensor(container_name: str) -> CheckResult:
             hint=output or "ros2 node list failed",
         )
     nodes = [line.strip() for line in output.splitlines() if line.strip()]
-    if any(node == "/looper" or node.endswith("/looper") or node == "looper" for node in nodes):
-        return CheckResult(name="looper", ok=True, message="Looper sensor detected.")
-    return CheckResult(name="looper", ok=False, message="Looper sensor not detected.")
+    if "/insight_full" in nodes:
+        return CheckResult(name="looper", ok=True, message="Looper sensor detected (/insight_full node found).")
+    return CheckResult(name="looper", ok=False, message="Looper sensor not detected (/insight_full node not found).")
 
 
 def _ensure_runtime_container(name: str) -> bool:
@@ -731,6 +732,32 @@ def run_map_list(command: MapListCommand) -> int:
 def run_sensors(command: SensorsCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
+
+    if command.preview:
+        xhost_result = _run_xhost_local()
+        _print_result(xhost_result)
+        if not xhost_result.ok:
+            return 1
+
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-it",
+                command.container_name,
+                "bash",
+                "-lc",
+                "bash /tinynav/scripts/run_sensors_preview.sh",
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            print("❌ Failed to launch tinynav sensor preview inside the container.")
+            print(f"   👉 Make sure the container {command.container_name} is running and initialized.")
+            return 1
+
+        print(f"✅ Started sensor preview inside container {command.container_name}.")
+        return 0
 
     results = [
         _list_realsense_sensor(command.container_name),
