@@ -692,9 +692,9 @@ def _list_looper_sensor(container_name: str) -> CheckResult:
             hint=output or "ros2 node list failed",
         )
     nodes = [line.strip() for line in output.splitlines() if line.strip()]
-    if any(node == "/looper" or node.endswith("/looper") or node == "looper" for node in nodes):
-        return CheckResult(name="looper", ok=True, message="Looper sensor detected.")
-    return CheckResult(name="looper", ok=False, message="Looper sensor not detected.")
+    if "/insight_full" in nodes:
+        return CheckResult(name="looper", ok=True, message="Looper sensor detected (/insight_full node found).")
+    return CheckResult(name="looper", ok=False, message="Looper sensor not detected (/insight_full node not found).")
 
 
 def _ensure_runtime_container(name: str) -> bool:
