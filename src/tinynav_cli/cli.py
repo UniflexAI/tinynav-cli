@@ -822,7 +822,7 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
     _docker_exec_output(command.container_name, "pkill -f '/tinynav/scripts/run_rosbag_record.sh'")
     _docker_exec_output(command.container_name, "pkill -f '/opt/ros/.*/bin/ros2 bag record'")
 
-    for _ in range(10):
+    for _ in range(30):
         if _map_status(command.container_name) != "recording":
             print(f"✅ Stopped map recording inside container {command.container_name}.")
             return 0
