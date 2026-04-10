@@ -817,20 +817,20 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
         return 1
     if _ensure_map_state(command.container_name, {"recording"}) is None:
         return 1
-    result = _docker_exec_output(
-        command.container_name,
-        " && ".join([
-            f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || true",
-            "pkill -f 'ros2 bag record' >/dev/null 2>&1 || true",
-            "pkill -f rosbag2_transport >/dev/null 2>&1 || true",
-        ]),
-    )
-    if result.returncode != 0:
-        print("❌ Failed to stop map recording inside the container.")
-        detail = (result.stderr or result.stdout).strip()
-        if detail:
-            print(f"   👉 {detail}")
-        return 1
+
+    stop_steps = [
+        ("tmux session", _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")),
+        ("ros2 bag record", _docker_exec_output(command.container_name, "pkill -f 'ros2 bag record'")),
+        ("rosbag2 transport", _docker_exec_output(command.container_name, "pkill -f rosbag2_transport")),
+    ]
+    for label, result in stop_steps:
+        if result.returncode == 0:
+            print(f"ℹ️  stop step succeeded: {label}")
+        else:
+            detail = (result.stderr or result.stdout).strip()
+            if detail:
+                print(f"ℹ️  stop step {label} output: {detail}")
+
     for _ in range(10):
         if _map_status(command.container_name) != "recording":
             print(f"✅ Stopped map recording inside container {command.container_name}.")
