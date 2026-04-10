@@ -78,7 +78,7 @@ State priority:
 - `tinynav map list`
   - allowed only in `idle`
   - lists built maps under the maps directory
-- `tinynav map build <rosbag_name>`
+- `tinynav map build --rosbag-name <rosbag_name>`
   - allowed only in `idle`
   - builds a map from a named rosbag
 
