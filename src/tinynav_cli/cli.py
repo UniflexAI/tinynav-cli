@@ -759,6 +759,14 @@ def _rosbags_dir() -> Path:
     return _workspace_data_dir() / "rosbags"
 
 
+def _container_maps_dir() -> Path:
+    return Path(CONTAINER_WORKSPACE_DIR) / "maps"
+
+
+def _container_rosbags_dir() -> Path:
+    return Path(CONTAINER_WORKSPACE_DIR) / "rosbags"
+
+
 def _format_size(num_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(num_bytes)
@@ -864,12 +872,14 @@ def run_map_build(command: MapBuildCommand) -> int:
     maps_dir = _maps_dir()
     maps_dir.mkdir(parents=True, exist_ok=True)
     map_output = maps_dir / command.rosbag_name
+    container_rosbag_path = _container_rosbags_dir() / command.rosbag_name
+    container_map_output = _container_maps_dir() / command.rosbag_name
     result = _docker_exec_output(
         command.container_name,
         " && ".join([
             f"tmux kill-session -t {MAP_BUILD_SESSION} >/dev/null 2>&1 || true",
             f"tmux new-session -d -s {MAP_BUILD_SESSION}",
-            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {map_output} --bag_file {rosbag_path}' C-m",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {container_map_output} --bag_file {container_rosbag_path}' C-m",
         ]),
     )
     if result.returncode != 0:
