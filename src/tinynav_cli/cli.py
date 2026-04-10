@@ -740,7 +740,7 @@ def _ros2_node_names(container_name: str) -> list[str]:
 
 def _map_status(container_name: str) -> str:
     nodes = _ros2_node_names(container_name)
-    if "/buid_map_node" in nodes:
+    if "/build_map_node" in nodes:
         return "building"
     if "/rosbag2_recorder" in nodes:
         return "recording"

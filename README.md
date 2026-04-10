@@ -57,11 +57,11 @@ No separate state file is used.
 - `recording`
   - detected when `ros2 node list` contains `/rosbag2_recorder`
 - `building`
-  - detected when `ros2 node list` contains `/buid_map_node`
+  - detected when `ros2 node list` contains `/build_map_node`
 
 State priority:
 
-1. `/buid_map_node` → `building`
+1. `/build_map_node` → `building`
 2. `/rosbag2_recorder` → `recording`
 3. otherwise → `idle`
 
