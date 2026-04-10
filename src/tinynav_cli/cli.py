@@ -797,9 +797,7 @@ def run_map_start_record(command: MapStartRecordCommand) -> int:
         " && ".join([
             f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || true",
             f"tmux new-session -d -s {MAP_RECORD_SESSION}",
-            f"tmux split-window -t {MAP_RECORD_SESSION} -v",
-            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 'bash /tinynav/scripts/run_realsense_sensor.sh' C-m",
-            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 'bash /tinynav/scripts/run_rosbag_record.sh' C-m",
+            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 'bash /tinynav/scripts/run_rosbag_record.sh' C-m",
         ]),
     )
     if result.returncode != 0:
@@ -818,7 +816,7 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
     if _ensure_map_state(command.container_name, {"recording"}) is None:
         return 1
 
-    _docker_exec_output(command.container_name, f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 C-c")
+    _docker_exec_output(command.container_name, f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 C-c")
     for _ in range(30):
         if _map_status(command.container_name) != "recording":
             _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")
