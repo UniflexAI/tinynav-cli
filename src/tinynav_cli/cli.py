@@ -102,7 +102,7 @@ class MapStopRecordCommand:
 class MapBuildCommand:
     """Build a map from a recorded rosbag."""
 
-    rosbag_name: Annotated[str, tyro.conf.arg(name="--rosbag-name")]
+    rosbag_name: Annotated[str, tyro.conf.arg(name="rosbag-name")]
     container_name: str = DEFAULT_CONTAINER_NAME
 
 
