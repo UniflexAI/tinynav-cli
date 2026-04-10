@@ -30,6 +30,7 @@ CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
 MAP_RECORD_SESSION = "tinynav_map_record"
+MAP_BUILD_SESSION = "tinynav_map_build"
 
 
 def _default_workspace_dir() -> str:
@@ -859,22 +860,28 @@ def run_map_build(command: MapBuildCommand) -> int:
     if not rosbag_path.exists():
         print(f"❌ rosbag not found: {rosbag_path}")
         return 1
+
     maps_dir = _maps_dir()
     maps_dir.mkdir(parents=True, exist_ok=True)
     map_output = maps_dir / command.rosbag_name
-    result = subprocess.run(
-        [
-            "docker", "exec", "-d", command.container_name,
-            "bash", "-lc",
-            f"export TINYNAV_ROSBAG_PATH={rosbag_path} TINYNAV_MAP_OUTPUT={map_output} && bash /tinynav/scripts/run_rosbag_build_map.sh",
-        ],
-        check=False,
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"tmux kill-session -t {MAP_BUILD_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {MAP_BUILD_SESSION}",
+            f"tmux split-window -t {MAP_BUILD_SESSION} -h",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/perception_node.py' C-m",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.1 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {map_output} --bag_file {rosbag_path}' C-m",
+        ]),
     )
     if result.returncode != 0:
         print("❌ Failed to start map building inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
         return 1
     print(f"✅ Started map build from rosbag {command.rosbag_name}.")
     print(f"   👉 output directory: {map_output}")
+    print(f"   👉 tmux session: {MAP_BUILD_SESSION}")
     return 0
 
 
