@@ -28,6 +28,7 @@ CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
+MAP_RECORD_SESSION = "tinynav_map_record"
 
 
 def _default_workspace_dir() -> str:
@@ -790,17 +791,23 @@ def run_map_start_record(command: MapStartRecordCommand) -> int:
         return 1
     if _ensure_map_state(command.container_name, {"idle"}) is None:
         return 1
-    result = subprocess.run(
-        [
-            "docker", "exec", "-d", command.container_name,
-            "bash", "-lc", "bash /tinynav/scripts/run_map_record.sh",
-        ],
-        check=False,
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {MAP_RECORD_SESSION}",
+            f"tmux split-window -t {MAP_RECORD_SESSION} -v",
+            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 'bash /tinynav/scripts/run_realsense_sensor.sh' C-m",
+            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 'bash /tinynav/scripts/run_rosbag_record.sh' C-m",
+        ]),
     )
     if result.returncode != 0:
         print("❌ Failed to start map recording inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
         return 1
     print(f"✅ Started map recording inside container {command.container_name}.")
+    print(f"   👉 tmux session: {MAP_RECORD_SESSION}")
     return 0
 
 
@@ -809,7 +816,10 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
         return 1
     if _ensure_map_state(command.container_name, {"recording"}) is None:
         return 1
-    result = _docker_exec_output(command.container_name, "pkill -f 'ros2 bag record' || true")
+    result = _docker_exec_output(
+        command.container_name,
+        f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || pkill -f 'ros2 bag record' || true",
+    )
     if result.returncode != 0:
         print("❌ Failed to stop map recording inside the container.")
         return 1
