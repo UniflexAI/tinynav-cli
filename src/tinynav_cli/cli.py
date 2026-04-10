@@ -869,9 +869,7 @@ def run_map_build(command: MapBuildCommand) -> int:
         " && ".join([
             f"tmux kill-session -t {MAP_BUILD_SESSION} >/dev/null 2>&1 || true",
             f"tmux new-session -d -s {MAP_BUILD_SESSION}",
-            f"tmux split-window -t {MAP_BUILD_SESSION} -h",
-            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/perception_node.py' C-m",
-            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.1 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {map_output} --bag_file {rosbag_path}' C-m",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {map_output} --bag_file {rosbag_path}' C-m",
         ]),
     )
     if result.returncode != 0:
