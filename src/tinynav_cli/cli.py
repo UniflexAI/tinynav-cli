@@ -762,16 +762,16 @@ def run_example(command: ExampleCommand) -> int:
             command.container_name,
             "bash",
             "-lc",
-            "bash /tinynav/scripts/run_rosbag_examples.sh",
+            "bash /tinynav/scripts/run_rosbag_record.sh",
         ],
         check=False,
     )
     if result.returncode != 0:
-        print("❌ Failed to launch tinynav example workflow inside the container.")
+        print("❌ Failed to launch rosbag record workflow inside the container.")
         print(f"   👉 Make sure the container {command.container_name} is running and initialized.")
         return 1
 
-    print(f"✅ Started rosbag example workflow inside container {command.container_name}.")
+    print(f"✅ Started rosbag record workflow inside container {command.container_name}.")
     return 0
 
 
