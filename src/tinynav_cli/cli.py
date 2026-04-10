@@ -758,6 +758,25 @@ def _rosbags_dir() -> Path:
     return _workspace_data_dir() / "rosbags"
 
 
+def _format_size(num_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    for file_path in path.rglob("*"):
+        if file_path.is_file():
+            total += file_path.stat().st_size
+    return total
+
+
 def _ensure_map_state(name: str, allowed: set[str]) -> str | None:
     state = _map_status(name)
     if state not in allowed:
@@ -864,18 +883,32 @@ def run_map_list(command: MapListCommand) -> int:
         return 1
     if _ensure_map_state(command.container_name, {"idle"}) is None:
         return 1
+
+    rosbags_dir = _rosbags_dir()
     maps_dir = _maps_dir()
-    if not maps_dir.exists():
-        print("tinynav maps\n============\n(no maps found)")
+    if not rosbags_dir.exists():
+        print("tinynav maps\n============\n(no rosbags found)")
         return 0
-    maps = sorted(path.name for path in maps_dir.iterdir() if path.is_dir())
+
+    rosbags = sorted(path for path in rosbags_dir.iterdir() if path.is_dir())
     print("tinynav maps")
     print("============")
-    if not maps:
-        print("(no maps found)")
+    if not rosbags:
+        print("(no rosbags found)")
         return 0
-    for name in maps:
-        print(f"- {name}")
+
+    name_width = max(len("name"), *(len(path.name) for path in rosbags))
+    size_width = len("size")
+    rows: list[tuple[str, str, str]] = []
+    for rosbag_path in rosbags:
+        size_text = _format_size(_directory_size(rosbag_path))
+        built = "yes" if (maps_dir / rosbag_path.name).is_dir() else "no"
+        size_width = max(size_width, len(size_text))
+        rows.append((rosbag_path.name, size_text, built))
+
+    print(f"{'name':<{name_width}}  {'size':>{size_width}}  built")
+    for name, size_text, built in rows:
+        print(f"{name:<{name_width}}  {size_text:>{size_width}}  {built}")
     return 0
 
 
