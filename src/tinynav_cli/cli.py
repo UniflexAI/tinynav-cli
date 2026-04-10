@@ -818,18 +818,9 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
     if _ensure_map_state(command.container_name, {"recording"}) is None:
         return 1
 
-    stop_steps = [
-        ("tmux session", _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")),
-        ("ros2 bag record", _docker_exec_output(command.container_name, "pkill -f 'ros2 bag record'")),
-        ("rosbag2 transport", _docker_exec_output(command.container_name, "pkill -f rosbag2_transport")),
-    ]
-    for label, result in stop_steps:
-        if result.returncode == 0:
-            print(f"ℹ️  stop step succeeded: {label}")
-        else:
-            detail = (result.stderr or result.stdout).strip()
-            if detail:
-                print(f"ℹ️  stop step {label} output: {detail}")
+    _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")
+    _docker_exec_output(command.container_name, "pkill -f '/tinynav/scripts/run_rosbag_record.sh'")
+    _docker_exec_output(command.container_name, "pkill -f '/opt/ros/.*/bin/ros2 bag record'")
 
     for _ in range(10):
         if _map_status(command.container_name) != "recording":
