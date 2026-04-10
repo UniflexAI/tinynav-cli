@@ -818,12 +818,10 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
     if _ensure_map_state(command.container_name, {"recording"}) is None:
         return 1
 
-    _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")
-    _docker_exec_output(command.container_name, "pkill -f '/tinynav/scripts/run_rosbag_record.sh'")
-    _docker_exec_output(command.container_name, "pkill -f '/opt/ros/.*/bin/ros2 bag record'")
-
+    _docker_exec_output(command.container_name, f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 C-c")
     for _ in range(30):
         if _map_status(command.container_name) != "recording":
+            _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")
             print(f"✅ Stopped map recording inside container {command.container_name}.")
             return 0
         time.sleep(0.5)
