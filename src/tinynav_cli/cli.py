@@ -8,6 +8,7 @@ import random
 import shutil
 import subprocess
 import sys
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,8 @@ CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
+MAP_RECORD_SESSION = "tinynav_map_record"
+MAP_BUILD_SESSION = "tinynav_map_build"
 
 
 def _default_workspace_dir() -> str:
@@ -75,9 +78,31 @@ class VersionCommand:
 
 
 @dataclass
-class MapBuildCommand:
-    """Build a map."""
+class MapStatusCommand:
+    """Show the current map workflow status."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class MapStartRecordCommand:
+    """Start map recording."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class MapStopRecordCommand:
+    """Stop map recording."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class MapBuildCommand:
+    """Build a map from a recorded rosbag."""
+
+    rosbag_name: Annotated[str, tyro.conf.arg(name="rosbag-name")]
     container_name: str = DEFAULT_CONTAINER_NAME
 
 
@@ -96,9 +121,12 @@ class SensorsCommand:
     preview: bool = False
 
 
+MapStatus = Annotated[MapStatusCommand, tyro.conf.subcommand(name="status")]
+MapStartRecord = Annotated[MapStartRecordCommand, tyro.conf.subcommand(name="start_record")]
+MapStopRecord = Annotated[MapStopRecordCommand, tyro.conf.subcommand(name="stop_record")]
 MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
-MapCommand = Union[MapBuild, MapList]
+MapCommand = Union[MapStatus, MapStartRecord, MapStopRecord, MapBuild, MapList]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -703,6 +731,71 @@ def _ensure_runtime_container(name: str) -> bool:
     return ensure_result.ok
 
 
+def _ros2_node_names(container_name: str) -> list[str]:
+    result = _docker_exec_output(container_name, "source /opt/ros/*/setup.bash >/dev/null 2>&1 && ros2 node list")
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _map_status(container_name: str) -> str:
+    nodes = _ros2_node_names(container_name)
+    if "/build_map_node" in nodes:
+        return "building"
+    if "/rosbag2_recorder" in nodes:
+        return "recording"
+    return "idle"
+
+
+def _workspace_data_dir() -> Path:
+    return Path(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))) / "tinynav"
+
+
+def _maps_dir() -> Path:
+    return _workspace_data_dir() / "maps"
+
+
+def _rosbags_dir() -> Path:
+    return _workspace_data_dir() / "rosbags"
+
+
+def _container_maps_dir() -> Path:
+    return Path(CONTAINER_WORKSPACE_DIR) / "maps"
+
+
+def _container_rosbags_dir() -> Path:
+    return Path(CONTAINER_WORKSPACE_DIR) / "rosbags"
+
+
+def _format_size(num_bytes: int) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    for unit in units:
+        if size < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    for file_path in path.rglob("*"):
+        if file_path.is_file():
+            total += file_path.stat().st_size
+    return total
+
+
+def _ensure_map_state(name: str, allowed: set[str]) -> str | None:
+    state = _map_status(name)
+    if state not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        print(f"❌ map command is only allowed in state: {allowed_text}")
+        print(f"   👉 current state: {state}")
+        return None
+    return state
+
+
 def run_version(command: VersionCommand) -> int:
     print(f"tinynav {__version__}")
     return 0
@@ -715,17 +808,124 @@ def run_nav(command: NavCommand) -> int:
     return 0
 
 
+def run_map_status(command: MapStatusCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    print(f"tinynav map status: {_map_status(command.container_name)}")
+    return 0
+
+
+def run_map_start_record(command: MapStartRecordCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    if _ensure_map_state(command.container_name, {"idle"}) is None:
+        return 1
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {MAP_RECORD_SESSION}",
+            f"tmux split-window -t {MAP_RECORD_SESSION} -v",
+            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 'bash /tinynav/scripts/run_realsense_sensor.sh' C-m",
+            f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 'bash /tinynav/scripts/run_rosbag_record.sh' C-m",
+        ]),
+    )
+    if result.returncode != 0:
+        print("❌ Failed to start map recording inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Started map recording inside container {command.container_name}.")
+    print(f"   👉 tmux session: {MAP_RECORD_SESSION}")
+    return 0
+
+
+def run_map_stop_record(command: MapStopRecordCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    if _ensure_map_state(command.container_name, {"recording"}) is None:
+        return 1
+
+    _docker_exec_output(command.container_name, f"tmux send-keys -t {MAP_RECORD_SESSION}:0.0 C-c")
+    _docker_exec_output(command.container_name, f"tmux send-keys -t {MAP_RECORD_SESSION}:0.1 C-c")
+    for _ in range(60):
+        if _map_status(command.container_name) != "recording":
+            _docker_exec_output(command.container_name, f"tmux kill-session -t {MAP_RECORD_SESSION}")
+            print(f"✅ Stopped map recording inside container {command.container_name}.")
+            return 0
+        time.sleep(0.5)
+    print("❌ Recorder is still running after stop request.")
+    print("   👉 ros2 node list still contains /rosbag2_recorder")
+    return 1
+
+
 def run_map_build(command: MapBuildCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
-    print("tinynav map build: not implemented yet")
+    if _ensure_map_state(command.container_name, {"idle"}) is None:
+        return 1
+    rosbag_path = _rosbags_dir() / command.rosbag_name
+    if not rosbag_path.exists():
+        print(f"❌ rosbag not found: {rosbag_path}")
+        return 1
+
+    maps_dir = _maps_dir()
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    map_output = maps_dir / command.rosbag_name
+    container_rosbag_path = _container_rosbags_dir() / command.rosbag_name
+    container_map_output = _container_maps_dir() / command.rosbag_name
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"tmux kill-session -t {MAP_BUILD_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {MAP_BUILD_SESSION}",
+            f"tmux split-window -t {MAP_BUILD_SESSION} -h",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/perception_node.py' C-m",
+            f"tmux send-keys -t {MAP_BUILD_SESSION}:0.1 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/build_map_node.py --map_save_path {container_map_output} --bag_file {container_rosbag_path}' C-m",
+        ]),
+    )
+    if result.returncode != 0:
+        print("❌ Failed to start map building inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Started map build from rosbag {command.rosbag_name}.")
+    print(f"   👉 output directory: {map_output}")
+    print(f"   👉 tmux session: {MAP_BUILD_SESSION}")
     return 0
 
 
 def run_map_list(command: MapListCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
-    print("tinynav map list: not implemented yet")
+    if _ensure_map_state(command.container_name, {"idle"}) is None:
+        return 1
+
+    rosbags_dir = _rosbags_dir()
+    maps_dir = _maps_dir()
+    if not rosbags_dir.exists():
+        print("tinynav maps\n============\n(no rosbags found)")
+        return 0
+
+    rosbags = sorted(path for path in rosbags_dir.iterdir() if path.is_dir())
+    print("tinynav maps")
+    print("============")
+    if not rosbags:
+        print("(no rosbags found)")
+        return 0
+
+    name_width = max(len("name"), *(len(path.name) for path in rosbags))
+    size_width = len("size")
+    rows: list[tuple[str, str, str]] = []
+    for rosbag_path in rosbags:
+        size_text = _format_size(_directory_size(rosbag_path))
+        built = "yes" if (maps_dir / rosbag_path.name).is_dir() else "no"
+        size_width = max(size_width, len(size_text))
+        rows.append((rosbag_path.name, size_text, built))
+
+    print(f"{'name':<{name_width}}  {'size':>{size_width}}  built")
+    for name, size_text, built in rows:
+        print(f"{name:<{name_width}}  {size_text:>{size_width}}  {built}")
     return 0
 
 
@@ -863,6 +1063,12 @@ def run(command: Command) -> int:
             return run_example(command)
         case VersionCommand():
             return run_version(command)
+        case MapStatusCommand():
+            return run_map_status(command)
+        case MapStartRecordCommand():
+            return run_map_start_record(command)
+        case MapStopRecordCommand():
+            return run_map_stop_record(command)
         case MapBuildCommand():
             return run_map_build(command)
         case MapListCommand():
