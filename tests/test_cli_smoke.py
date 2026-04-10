@@ -55,8 +55,12 @@ def test_example_help_runs() -> None:
 def test_map_help_runs() -> None:
     result = run_cli("map", "--help")
     assert result.returncode == 0
-    assert "build" in output_text(result)
-    assert "list" in output_text(result)
+    text = output_text(result)
+    assert "status" in text
+    assert "start_record" in text
+    assert "stop_record" in text
+    assert "build" in text
+    assert "list" in text
 
 
 def test_sensors_help_runs() -> None:
