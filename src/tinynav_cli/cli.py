@@ -927,7 +927,7 @@ def run_map_edit_pois(command: MapEditPoisCommand) -> int:
         " && ".join([
             f"tmux kill-session -t {MAP_EDIT_POIS_SESSION} >/dev/null 2>&1 || true",
             f"tmux new-session -d -s {MAP_EDIT_POIS_SESSION}",
-            f"tmux send-keys -t {MAP_EDIT_POIS_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tool/poi_editor.py {container_map_path}' C-m",
+            f"tmux send-keys -t {MAP_EDIT_POIS_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tool/poi_editor.py --tinynav-map-path {container_map_path}' C-m",
         ]),
     )
     if result.returncode != 0:
