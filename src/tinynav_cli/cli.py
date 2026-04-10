@@ -935,9 +935,15 @@ def run_map_edit_pois(command: MapEditPoisCommand) -> int:
         if result.stderr or result.stdout:
             print(f"   👉 {(result.stderr or result.stdout).strip()}")
         return 1
+    editor_url = "http://localhost:8080/"
+    opener = shutil.which("xdg-open")
+    if opener is not None:
+        subprocess.Popen([opener, editor_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     print(f"✅ Started POI editor for map {command.map_name}.")
     print(f"   👉 map directory: {map_path}")
     print(f"   👉 tmux session: {MAP_EDIT_POIS_SESSION}")
+    print(f"   👉 open in browser: {editor_url}")
     return 0
 
 

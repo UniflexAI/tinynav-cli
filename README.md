@@ -89,6 +89,7 @@ State priority:
 - `tinynav map edit_pois --map-name <map_name>`
   - allowed only in `idle`
   - starts the POI editor for an existing map in a tmux session inside the container
+  - opens `http://localhost:8080/` in the default browser when possible
   - reads and writes `pois.json` under the selected map directory
 
 ### Planned data layout
