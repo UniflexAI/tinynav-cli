@@ -19,6 +19,7 @@ tinynav map status
 tinynav map start_record
 tinynav map stop_record
 tinynav map build --rosbag-name <rosbag_name>
+tinynav map edit_pois --map-name <map_name>
 tinynav map list
 tinynav sensors
 tinynav sensors --preview
@@ -85,6 +86,10 @@ State priority:
 - `tinynav map build --rosbag-name <rosbag_name>`
   - allowed only in `idle`
   - starts the map build workflow in a tmux session inside the container
+- `tinynav map edit_pois --map-name <map_name>`
+  - allowed only in `idle`
+  - starts the POI editor for an existing map in a tmux session inside the container
+  - reads and writes `pois.json` under the selected map directory
 
 ### Planned data layout
 

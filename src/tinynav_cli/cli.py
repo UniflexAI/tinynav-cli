@@ -31,6 +31,7 @@ DEFAULT_CONTAINER_NAME = "tinynav_cli"
 CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
 MAP_RECORD_SESSION = "tinynav_map_record"
 MAP_BUILD_SESSION = "tinynav_map_build"
+MAP_EDIT_POIS_SESSION = "tinynav_map_edit_pois"
 
 
 def _default_workspace_dir() -> str:
@@ -107,6 +108,14 @@ class MapBuildCommand:
 
 
 @dataclass
+class MapEditPoisCommand:
+    """Edit POIs for an existing map."""
+
+    map_name: Annotated[str, tyro.conf.arg(name="map-name")]
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
 class MapListCommand:
     """List known maps."""
 
@@ -125,8 +134,9 @@ MapStatus = Annotated[MapStatusCommand, tyro.conf.subcommand(name="status")]
 MapStartRecord = Annotated[MapStartRecordCommand, tyro.conf.subcommand(name="start_record")]
 MapStopRecord = Annotated[MapStopRecordCommand, tyro.conf.subcommand(name="stop_record")]
 MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
+MapEditPois = Annotated[MapEditPoisCommand, tyro.conf.subcommand(name="edit_pois")]
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
-MapCommand = Union[MapStatus, MapStartRecord, MapStopRecord, MapBuild, MapList]
+MapCommand = Union[MapStatus, MapStartRecord, MapStopRecord, MapBuild, MapEditPois, MapList]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -895,6 +905,42 @@ def run_map_build(command: MapBuildCommand) -> int:
     return 0
 
 
+def run_map_edit_pois(command: MapEditPoisCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    if _ensure_map_state(command.container_name, {"idle"}) is None:
+        return 1
+
+    map_path = _maps_dir() / command.map_name
+    if not map_path.exists():
+        print(f"❌ map not found: {map_path}")
+        return 1
+
+    container_map_path = _container_maps_dir() / command.map_name
+    xhost_result = _run_xhost_local()
+    _print_result(xhost_result)
+    if not xhost_result.ok:
+        return 1
+
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"tmux kill-session -t {MAP_EDIT_POIS_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {MAP_EDIT_POIS_SESSION}",
+            f"tmux send-keys -t {MAP_EDIT_POIS_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tool/poi_editor.py {container_map_path}' C-m",
+        ]),
+    )
+    if result.returncode != 0:
+        print("❌ Failed to start POI editor inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Started POI editor for map {command.map_name}.")
+    print(f"   👉 map directory: {map_path}")
+    print(f"   👉 tmux session: {MAP_EDIT_POIS_SESSION}")
+    return 0
+
+
 def run_map_list(command: MapListCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
@@ -1071,6 +1117,8 @@ def run(command: Command) -> int:
             return run_map_stop_record(command)
         case MapBuildCommand():
             return run_map_build(command)
+        case MapEditPoisCommand():
+            return run_map_edit_pois(command)
         case MapListCommand():
             return run_map_list(command)
         case SensorsCommand():
