@@ -15,9 +15,13 @@ tinynav init
 tinynav doctor
 tinynav example
 tinynav nav
-tinynav map build
+tinynav map status
+tinynav map start_record
+tinynav map stop_record
+tinynav map build --rosbag-name <rosbag_name>
 tinynav map list
 tinynav sensors
+tinynav sensors --preview
 tinynav version
 ```
 
@@ -45,9 +49,9 @@ tinynav example
 - `tinynav sensors --preview` launches the sensor preview workflow inside the running container via `/tinynav/scripts/run_sensors_preview.sh`.
 - `tinynav version` prints the CLI version.
 
-## Planned `tinynav map` command spec
+## `tinynav map` commands
 
-The `tinynav map` workflow is planned around three runtime states inferred directly from `ros2 node list`.
+The `tinynav map` workflow uses three runtime states inferred directly from `ros2 node list`.
 No separate state file is used.
 
 ### Map states
@@ -65,22 +69,22 @@ State priority:
 2. `/rosbag2_recorder` → `recording`
 3. otherwise → `idle`
 
-### Planned commands
+### Commands
 
 - `tinynav map status`
   - reports one of `idle`, `recording`, or `building`
 - `tinynav map start_record`
   - allowed only in `idle`
-  - starts the recording workflow
+  - starts the recording workflow in a tmux session inside the container
 - `tinynav map stop_record`
   - allowed only in `recording`
   - stops the recording workflow
 - `tinynav map list`
   - allowed only in `idle`
-  - lists built maps under the maps directory
+  - lists rosbags, their directory sizes, and whether a corresponding map has been built
 - `tinynav map build --rosbag-name <rosbag_name>`
   - allowed only in `idle`
-  - builds a map from a named rosbag
+  - starts the map build workflow in a tmux session inside the container
 
 ### Planned data layout
 
