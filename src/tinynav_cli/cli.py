@@ -8,6 +8,7 @@ import random
 import shutil
 import subprocess
 import sys
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -818,13 +819,23 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
         return 1
     result = _docker_exec_output(
         command.container_name,
-        f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || pkill -f 'ros2 bag record' || true",
+        " && ".join([
+            f"tmux kill-session -t {MAP_RECORD_SESSION} >/dev/null 2>&1 || true",
+            "pkill -f 'ros2 bag record' >/dev/null 2>&1 || true",
+            "pkill -f rosbag2_transport >/dev/null 2>&1 || true",
+        ]),
     )
     if result.returncode != 0:
         print("❌ Failed to stop map recording inside the container.")
         return 1
-    print(f"✅ Stopped map recording inside container {command.container_name}.")
-    return 0
+    for _ in range(10):
+        if _map_status(command.container_name) != "recording":
+            print(f"✅ Stopped map recording inside container {command.container_name}.")
+            return 0
+        time.sleep(0.5)
+    print("❌ Recorder is still running after stop request.")
+    print("   👉 ros2 node list still contains /rosbag2_recorder")
+    return 1
 
 
 def run_map_build(command: MapBuildCommand) -> int:
