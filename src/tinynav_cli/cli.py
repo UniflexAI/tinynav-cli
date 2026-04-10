@@ -827,6 +827,9 @@ def run_map_stop_record(command: MapStopRecordCommand) -> int:
     )
     if result.returncode != 0:
         print("❌ Failed to stop map recording inside the container.")
+        detail = (result.stderr or result.stdout).strip()
+        if detail:
+            print(f"   👉 {detail}")
         return 1
     for _ in range(10):
         if _map_status(command.container_name) != "recording":
