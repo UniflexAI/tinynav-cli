@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import grp
+import json
 import os
 import platform
 import random
@@ -15,8 +16,10 @@ from pathlib import Path
 from typing import Union
 
 import tyro
+from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 from typing_extensions import Annotated
 
@@ -796,6 +799,19 @@ def _directory_size(path: Path) -> int:
     return total
 
 
+def _poi_count(map_path: Path) -> int:
+    pois_path = map_path / "pois.json"
+    if not pois_path.exists():
+        return 0
+    with pois_path.open() as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        return len(data)
+    if isinstance(data, list):
+        return len(data)
+    return 0
+
+
 def _ensure_map_state(name: str, allowed: set[str]) -> str | None:
     state = _map_status(name)
     if state not in allowed:
@@ -960,24 +976,24 @@ def run_map_list(command: MapListCommand) -> int:
         return 0
 
     rosbags = sorted(path for path in rosbags_dir.iterdir() if path.is_dir())
-    print("tinynav maps")
-    print("============")
     if not rosbags:
-        print("(no rosbags found)")
+        print("tinynav maps\n============\n(no rosbags found)")
         return 0
 
-    name_width = max(len("name"), *(len(path.name) for path in rosbags))
-    size_width = len("size")
-    rows: list[tuple[str, str, str]] = []
+    table = Table(title="tinynav maps")
+    table.add_column("name", style="cyan")
+    table.add_column("size", justify="right")
+    table.add_column("built", justify="center")
+    table.add_column("pois", justify="right")
+
     for rosbag_path in rosbags:
         size_text = _format_size(_directory_size(rosbag_path))
-        built = "yes" if (maps_dir / rosbag_path.name).is_dir() else "no"
-        size_width = max(size_width, len(size_text))
-        rows.append((rosbag_path.name, size_text, built))
+        map_path = maps_dir / rosbag_path.name
+        built = "[green]yes[/green]" if map_path.is_dir() else "[dim]no[/dim]"
+        pois_text = str(_poi_count(map_path)) if map_path.is_dir() else "0"
+        table.add_row(rosbag_path.name, size_text, built, pois_text)
 
-    print(f"{'name':<{name_width}}  {'size':>{size_width}}  built")
-    for name, size_text, built in rows:
-        print(f"{name:<{name_width}}  {size_text:>{size_width}}  {built}")
+    Console().print(table)
     return 0
 
 
