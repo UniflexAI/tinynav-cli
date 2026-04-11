@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import grp
+import json
 import os
 import platform
 import random
@@ -796,6 +797,19 @@ def _directory_size(path: Path) -> int:
     return total
 
 
+def _poi_count(map_path: Path) -> int:
+    pois_path = map_path / "pois.json"
+    if not pois_path.exists():
+        return 0
+    with pois_path.open() as f:
+        data = json.load(f)
+    if isinstance(data, dict):
+        return len(data)
+    if isinstance(data, list):
+        return len(data)
+    return 0
+
+
 def _ensure_map_state(name: str, allowed: set[str]) -> str | None:
     state = _map_status(name)
     if state not in allowed:
@@ -968,16 +982,20 @@ def run_map_list(command: MapListCommand) -> int:
 
     name_width = max(len("name"), *(len(path.name) for path in rosbags))
     size_width = len("size")
-    rows: list[tuple[str, str, str]] = []
+    pois_width = len("pois")
+    rows: list[tuple[str, str, str, str]] = []
     for rosbag_path in rosbags:
         size_text = _format_size(_directory_size(rosbag_path))
-        built = "yes" if (maps_dir / rosbag_path.name).is_dir() else "no"
+        map_path = maps_dir / rosbag_path.name
+        built = "yes" if map_path.is_dir() else "no"
+        pois_text = str(_poi_count(map_path)) if map_path.is_dir() else "0"
         size_width = max(size_width, len(size_text))
-        rows.append((rosbag_path.name, size_text, built))
+        pois_width = max(pois_width, len(pois_text))
+        rows.append((rosbag_path.name, size_text, built, pois_text))
 
-    print(f"{'name':<{name_width}}  {'size':>{size_width}}  built")
-    for name, size_text, built in rows:
-        print(f"{name:<{name_width}}  {size_text:>{size_width}}  {built}")
+    print(f"{'name':<{name_width}}  {'size':>{size_width}}  built  {'pois':>{pois_width}}")
+    for name, size_text, built, pois_text in rows:
+        print(f"{name:<{name_width}}  {size_text:>{size_width}}  {built}  {pois_text:>{pois_width}}")
     return 0
 
 

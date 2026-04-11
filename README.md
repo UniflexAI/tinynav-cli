@@ -82,7 +82,7 @@ State priority:
   - stops the recording workflow
 - `tinynav map list`
   - allowed only in `idle`
-  - lists rosbags, their directory sizes, and whether a corresponding map has been built
+  - lists rosbags, their directory sizes, whether a corresponding map has been built, and the number of POIs
 - `tinynav map build --rosbag-name <rosbag_name>`
   - allowed only in `idle`
   - starts the map build workflow in a tmux session inside the container
