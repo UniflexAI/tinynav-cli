@@ -32,6 +32,7 @@ CN_PIP_INDEX_URL = "https://mirrors.aliyun.com/pypi/simple/"
 CN_PIP_TRUSTED_HOST = "mirrors.aliyun.com"
 DEFAULT_CONTAINER_NAME = "tinynav_cli"
 CONTAINER_WORKSPACE_DIR = "/root/.local/share/tinynav"
+CONTAINER_WORKDIR = "/tinynav"
 MAP_RECORD_SESSION = "tinynav_map_record"
 MAP_BUILD_SESSION = "tinynav_map_build"
 MAP_EDIT_POIS_SESSION = "tinynav_map_edit_pois"
@@ -492,7 +493,7 @@ def _docker_run(command: InitCommand) -> CheckResult:
         *([] if command.ros_domain_id is None else ["-e", f"ROS_DOMAIN_ID={command.ros_domain_id}"]),
         *_cn_env_args(command.cn_mode),
         "-w",
-        CONTAINER_WORKSPACE_DIR,
+        CONTAINER_WORKDIR,
         "--entrypoint",
         "",
         command.docker_image,
