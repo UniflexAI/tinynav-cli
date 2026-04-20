@@ -69,3 +69,14 @@ def test_sensors_help_runs() -> None:
     text = output_text(result).lower()
     assert "container" in text
     assert "preview" in text
+
+
+
+def test_nav_help_runs() -> None:
+    result = run_cli("nav", "--help")
+    assert result.returncode == 0
+    text = output_text(result)
+    assert "status" in text
+    assert "start" in text
+    assert "go" in text
+    assert "stop" in text
