@@ -36,6 +36,7 @@ CONTAINER_WORKDIR = "/tinynav"
 MAP_RECORD_SESSION = "tinynav_map_record"
 MAP_BUILD_SESSION = "tinynav_map_build"
 MAP_EDIT_POIS_SESSION = "tinynav_map_edit_pois"
+NAV_SESSION = "tinynav_nav"
 
 
 def _default_workspace_dir() -> str:
@@ -64,9 +65,17 @@ class DoctorCommand:
 
 
 @dataclass
-class NavCommand:
-    """Run a navigation task."""
+class NavStatusCommand:
+    """Show the current navigation workflow status."""
 
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class NavStartCommand:
+    """Start the navigation workflow."""
+
+    map_name: Annotated[str, tyro.conf.arg(name="map-name")]
     container_name: str = DEFAULT_CONTAINER_NAME
 
 
@@ -141,6 +150,18 @@ MapBuild = Annotated[MapBuildCommand, tyro.conf.subcommand(name="build")]
 MapEditPois = Annotated[MapEditPoisCommand, tyro.conf.subcommand(name="edit_pois")]
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapStatus, MapStartRecord, MapStopRecord, MapBuild, MapEditPois, MapList]
+
+@dataclass
+class NavStopCommand:
+    """Stop the navigation workflow."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+NavStatus = Annotated[NavStatusCommand, tyro.conf.subcommand(name="status")]
+NavStart = Annotated[NavStartCommand, tyro.conf.subcommand(name="start")]
+NavStop = Annotated[NavStopCommand, tyro.conf.subcommand(name="stop")]
+NavCommand = Union[NavStatus, NavStart, NavStop]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -752,6 +773,29 @@ def _ros2_node_names(container_name: str) -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+NAV_REQUIRED_NODES = {
+    "/perception_node": "perception_node.py",
+    "/planning_node": "planning_node.py",
+    "/map_node": "map_node.py",
+    "/cmd_vel_control_node": "cmd_vel_control.py",
+}
+
+
+def _tmux_session_exists(container_name: str, session_name: str) -> bool:
+    result = _docker_exec_output(container_name, f"tmux has-session -t {session_name}")
+    return result.returncode == 0
+
+
+def _nav_status(container_name: str) -> tuple[str, list[str]]:
+    if not _tmux_session_exists(container_name, NAV_SESSION):
+        return "idle", []
+    nodes = set(_ros2_node_names(container_name))
+    missing = [node for node in NAV_REQUIRED_NODES if node not in nodes]
+    if missing:
+        return "starting", missing
+    return "running", []
+
+
 def _map_status(container_name: str) -> str:
     nodes = _ros2_node_names(container_name)
     if "/build_map_node" in nodes:
@@ -852,10 +896,67 @@ def run_version(command: VersionCommand) -> int:
     return 0
 
 
-def run_nav(command: NavCommand) -> int:
+def run_nav_status(command: NavStatusCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
-    print("tinynav nav: not implemented yet")
+    status, missing = _nav_status(command.container_name)
+    print(f"tinynav nav status: {status}")
+    if missing:
+        print(f"   👉 missing nodes: {', '.join(missing)}")
+    return 0
+
+
+def run_nav_start(command: NavStartCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    status, _ = _nav_status(command.container_name)
+    if status != "idle":
+        print(f"❌ nav start is only allowed in idle state")
+        print(f"   👉 current state: {status}")
+        return 1
+    container_map_path = _container_maps_dir() / command.map_name
+    result = _docker_exec_output(
+        command.container_name,
+        " && ".join([
+            f"test -d {container_map_path}",
+            f"tmux kill-session -t {NAV_SESSION} >/dev/null 2>&1 || true",
+            f"tmux new-session -d -s {NAV_SESSION}",
+            f"tmux split-window -t {NAV_SESSION} -h",
+            f"tmux split-window -t {NAV_SESSION}:0.0 -v",
+            f"tmux split-window -t {NAV_SESSION}:0.1 -v",
+            f"tmux send-keys -t {NAV_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/perception_node.py' C-m",
+            f"tmux send-keys -t {NAV_SESSION}:0.1 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/planning_node.py' C-m",
+            f"tmux send-keys -t {NAV_SESSION}:0.2 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/platforms/cmd_vel_control.py' C-m",
+            f"tmux send-keys -t {NAV_SESSION}:0.3 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/map_node.py --tinynav_map_path {container_map_path}' C-m",
+        ]),
+    )
+    if result.returncode != 0:
+        print("❌ Failed to start navigation inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Started navigation inside container {command.container_name}.")
+    print(f"   👉 tmux session: {NAV_SESSION}")
+    print(f"   👉 map: {command.map_name}")
+    return 0
+
+
+def run_nav_stop(command: NavStopCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    if not _tmux_session_exists(command.container_name, NAV_SESSION):
+        print("✅ Navigation is not running.")
+        return 0
+    for pane in ("0.0", "0.1", "0.2", "0.3"):
+        _docker_exec_output(command.container_name, f"tmux send-keys -t {NAV_SESSION}:{pane} C-c")
+    time.sleep(1.0)
+    result = _docker_exec_output(command.container_name, f"tmux kill-session -t {NAV_SESSION}")
+    if result.returncode != 0:
+        print("❌ Failed to stop navigation inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Stopped navigation inside container {command.container_name}.")
     return 0
 
 
@@ -1158,8 +1259,12 @@ def run(command: Command) -> int:
             return run_init(command)
         case DoctorCommand():
             return run_doctor(command)
-        case NavCommand():
-            return run_nav(command)
+        case NavStatusCommand():
+            return run_nav_status(command)
+        case NavStartCommand():
+            return run_nav_start(command)
+        case NavStopCommand():
+            return run_nav_stop(command)
         case ExampleCommand():
             return run_example(command)
         case VersionCommand():
