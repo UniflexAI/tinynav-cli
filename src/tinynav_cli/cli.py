@@ -980,6 +980,11 @@ def run_nav_start(command: NavStartCommand) -> int:
 def run_nav_go(command: NavGoCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
+    status, _ = _nav_status(command.container_name)
+    if status != "running":
+        print("❌ nav go is only allowed in running state")
+        print(f"   👉 current state: {status}")
+        return 1
     map_path = _maps_dir() / command.map_name
     try:
         payload = _selected_cmd_pois(map_path, command.pois)
