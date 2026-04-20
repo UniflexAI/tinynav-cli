@@ -151,9 +151,17 @@ MapEditPois = Annotated[MapEditPoisCommand, tyro.conf.subcommand(name="edit_pois
 MapList = Annotated[MapListCommand, tyro.conf.subcommand(name="list")]
 MapCommand = Union[MapStatus, MapStartRecord, MapStopRecord, MapBuild, MapEditPois, MapList]
 
+@dataclass
+class NavStopCommand:
+    """Stop the navigation workflow."""
+
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
 NavStatus = Annotated[NavStatusCommand, tyro.conf.subcommand(name="status")]
 NavStart = Annotated[NavStartCommand, tyro.conf.subcommand(name="start")]
-NavCommand = Union[NavStatus, NavStart]
+NavStop = Annotated[NavStopCommand, tyro.conf.subcommand(name="stop")]
+NavCommand = Union[NavStatus, NavStart, NavStop]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -933,6 +941,25 @@ def run_nav_start(command: NavStartCommand) -> int:
     return 0
 
 
+def run_nav_stop(command: NavStopCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    if not _tmux_session_exists(command.container_name, NAV_SESSION):
+        print("✅ Navigation is not running.")
+        return 0
+    for pane in ("0.0", "0.1", "0.2", "0.3"):
+        _docker_exec_output(command.container_name, f"tmux send-keys -t {NAV_SESSION}:{pane} C-c")
+    time.sleep(1.0)
+    result = _docker_exec_output(command.container_name, f"tmux kill-session -t {NAV_SESSION}")
+    if result.returncode != 0:
+        print("❌ Failed to stop navigation inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Stopped navigation inside container {command.container_name}.")
+    return 0
+
+
 def run_map_status(command: MapStatusCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
@@ -1236,6 +1263,8 @@ def run(command: Command) -> int:
             return run_nav_status(command)
         case NavStartCommand():
             return run_nav_start(command)
+        case NavStopCommand():
+            return run_nav_stop(command)
         case ExampleCommand():
             return run_example(command)
         case VersionCommand():
