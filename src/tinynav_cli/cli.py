@@ -777,7 +777,7 @@ NAV_REQUIRED_NODES = {
     "/perception_node": "perception_node.py",
     "/planning_node": "planning_node.py",
     "/map_node": "map_node.py",
-    "/control_node": "lekiwi_control.py",
+    "/cmd_vel_control_node": "cmd_vel_control.py",
 }
 
 
@@ -926,7 +926,7 @@ def run_nav_start(command: NavStartCommand) -> int:
             f"tmux split-window -t {NAV_SESSION}:0.1 -v",
             f"tmux send-keys -t {NAV_SESSION}:0.0 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/perception_node.py' C-m",
             f"tmux send-keys -t {NAV_SESSION}:0.1 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/planning_node.py' C-m",
-            f"tmux send-keys -t {NAV_SESSION}:0.2 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/platforms/lekiwi_control.py' C-m",
+            f"tmux send-keys -t {NAV_SESSION}:0.2 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/platforms/cmd_vel_control.py' C-m",
             f"tmux send-keys -t {NAV_SESSION}:0.3 'source /opt/ros/*/setup.bash >/dev/null 2>&1 && uv run python /tinynav/tinynav/core/map_node.py --tinynav_map_path {container_map_path}' C-m",
         ]),
     )
