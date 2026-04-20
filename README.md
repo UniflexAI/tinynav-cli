@@ -16,7 +16,7 @@ tinynav doctor
 tinynav example
 tinynav nav status
 tinynav nav start --map-name <map_name>
-tinynav nav go --map-name <map_name> [--pois 2,1,0]
+tinynav nav go [--pois 2,1,0]
 tinynav nav stop
 tinynav map status
 tinynav map start_record
@@ -138,7 +138,8 @@ Required ROS nodes:
   - allowed only in `idle`
   - starts navigation panes in a tmux session inside the container
   - passes the selected map path to `map_node.py`
-- `tinynav nav go --map-name <map_name> [--pois 2,1,0]`
+- `tinynav nav go [--pois 2,1,0]`
+  - uses the map name recorded by the running nav tmux session
   - loads `maps/<map_name>/pois.json`
   - if `--pois` is provided, reorders the outer keys to match the requested POI id sequence
   - keeps each POI object's inner `id` unchanged
