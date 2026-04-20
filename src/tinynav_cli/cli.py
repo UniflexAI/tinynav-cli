@@ -160,8 +160,8 @@ class CheckResult:
     hint: str | None = None
 
 
-def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, capture_output=True, text=True, check=False)
+def _run(command: list[str], timeout: float | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
 
 
 def _run_streaming(command: list[str]) -> int:
@@ -761,6 +761,30 @@ def _map_status(container_name: str) -> str:
     return "idle"
 
 
+def _map_build_percent(container_name: str) -> float | None:
+    try:
+        result = _run([
+            "docker",
+            "exec",
+            container_name,
+            "bash",
+            "-lc",
+            "source /opt/ros/*/setup.bash >/dev/null 2>&1 && ros2 topic echo --once /mapping/percent",
+        ], timeout=3.0)
+    except subprocess.TimeoutExpired:
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("data:"):
+            try:
+                return float(stripped.split(":", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
+
+
 def _workspace_data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share"))) / "tinynav"
 
@@ -838,7 +862,15 @@ def run_nav(command: NavCommand) -> int:
 def run_map_status(command: MapStatusCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
-    print(f"tinynav map status: {_map_status(command.container_name)}")
+    status = _map_status(command.container_name)
+    if status != "building":
+        print(f"tinynav map status: {status}")
+        return 0
+    percent = _map_build_percent(command.container_name)
+    if percent is None:
+        print(f"tinynav map status: {status}")
+        return 0
+    print(f"tinynav map status: {status} ({percent:.2f}%)")
     return 0
 
 
