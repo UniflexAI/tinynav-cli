@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import random
+import shlex
 import shutil
 import subprocess
 import sys
@@ -76,6 +77,15 @@ class NavStartCommand:
     """Start the navigation workflow."""
 
     map_name: Annotated[str, tyro.conf.arg(name="map-name")]
+    container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class NavGoCommand:
+    """Publish POIs for navigation."""
+
+    map_name: Annotated[str, tyro.conf.arg(name="map-name")]
+    pois: str | None = None
     container_name: str = DEFAULT_CONTAINER_NAME
 
 
@@ -160,8 +170,9 @@ class NavStopCommand:
 
 NavStatus = Annotated[NavStatusCommand, tyro.conf.subcommand(name="status")]
 NavStart = Annotated[NavStartCommand, tyro.conf.subcommand(name="start")]
+NavGo = Annotated[NavGoCommand, tyro.conf.subcommand(name="go")]
 NavStop = Annotated[NavStopCommand, tyro.conf.subcommand(name="stop")]
-NavCommand = Union[NavStatus, NavStart, NavStop]
+NavCommand = Union[NavStatus, NavStart, NavGo, NavStop]
 
 Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
@@ -845,6 +856,31 @@ def _container_maps_dir() -> Path:
     return Path(CONTAINER_WORKSPACE_DIR) / "maps"
 
 
+def _parse_poi_selection(pois: str) -> list[str]:
+    values = [value.strip() for value in pois.split(",") if value.strip()]
+    if not values:
+        raise ValueError("--pois must be a comma-separated list like 2,1,0")
+    return values
+
+
+def _selected_cmd_pois(map_path: Path, pois: str | None) -> dict[str, object]:
+    pois_path = map_path / "pois.json"
+    if not pois_path.exists():
+        raise FileNotFoundError(f"POI file not found: {pois_path}")
+    with pois_path.open() as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("pois.json must be a JSON object")
+    if pois is None:
+        return data
+    selected = {}
+    for index, poi_key in enumerate(_parse_poi_selection(pois)):
+        if poi_key not in data:
+            raise KeyError(f"POI {poi_key} not found in {pois_path}")
+        selected[str(index)] = data[poi_key]
+    return selected
+
+
 def _container_rosbags_dir() -> Path:
     return Path(CONTAINER_WORKSPACE_DIR) / "rosbags"
 
@@ -938,6 +974,37 @@ def run_nav_start(command: NavStartCommand) -> int:
     print(f"✅ Started navigation inside container {command.container_name}.")
     print(f"   👉 tmux session: {NAV_SESSION}")
     print(f"   👉 map: {command.map_name}")
+    return 0
+
+
+def run_nav_go(command: NavGoCommand) -> int:
+    if not _ensure_runtime_container(command.container_name):
+        return 1
+    map_path = _maps_dir() / command.map_name
+    try:
+        payload = _selected_cmd_pois(map_path, command.pois)
+    except (FileNotFoundError, ValueError, KeyError) as exc:
+        print("❌ Failed to prepare navigation POIs.")
+        print(f"   👉 {exc}")
+        return 1
+    payload_json = json.dumps(payload, separators=(",", ":"))
+    msg_arg = shlex.quote(f"{{data: {payload_json}}}")
+    result = _docker_exec_output(
+        command.container_name,
+        "source /opt/ros/*/setup.bash >/dev/null 2>&1 && "
+        f"ros2 topic pub --once /mapping/cmd_pois std_msgs/msg/String {msg_arg}",
+    )
+    if result.returncode != 0:
+        print("❌ Failed to publish navigation POIs inside the container.")
+        if result.stderr or result.stdout:
+            print(f"   👉 {(result.stderr or result.stdout).strip()}")
+        return 1
+    print(f"✅ Published navigation POIs inside container {command.container_name}.")
+    print(f"   👉 map: {command.map_name}")
+    if command.pois is None:
+        print("   👉 pois: all")
+    else:
+        print(f"   👉 pois: {command.pois}")
     return 0
 
 
@@ -1263,6 +1330,8 @@ def run(command: Command) -> int:
             return run_nav_status(command)
         case NavStartCommand():
             return run_nav_start(command)
+        case NavGoCommand():
+            return run_nav_go(command)
         case NavStopCommand():
             return run_nav_stop(command)
         case ExampleCommand():
