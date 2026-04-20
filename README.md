@@ -14,7 +14,10 @@ pip install tinynav
 tinynav init
 tinynav doctor
 tinynav example
-tinynav nav
+tinynav nav status
+tinynav nav start --map-name <map_name>
+tinynav nav go --map-name <map_name> [--pois 2,1,0]
+tinynav nav stop
 tinynav map status
 tinynav map start_record
 tinynav map stop_record
@@ -104,3 +107,41 @@ The intent is:
 - recording outputs go under `rosbags/`
 - map build outputs go under `maps/`
 - `map build` consumes a rosbag name from `rosbags/` and produces a map directory in `maps/`
+
+
+## `tinynav nav` commands
+
+The `tinynav nav` workflow is managed inside a tmux session in the running container.
+The CLI currently uses the session name `tinynav_nav`.
+
+### Nav states
+
+- `idle`
+  - no navigation tmux session exists
+- `starting`
+  - tmux session exists but required ROS nodes are not all visible yet
+- `running`
+  - required ROS nodes are all present
+
+Required ROS nodes:
+
+- `/perception_node`
+- `/planning_node`
+- `/map_node`
+- `/cmd_vel_control_node`
+
+### Commands
+
+- `tinynav nav status`
+  - reports one of `idle`, `starting`, or `running`
+- `tinynav nav start --map-name <map_name>`
+  - allowed only in `idle`
+  - starts navigation panes in a tmux session inside the container
+  - passes the selected map path to `map_node.py`
+- `tinynav nav go --map-name <map_name> [--pois 2,1,0]`
+  - loads `maps/<map_name>/pois.json`
+  - if `--pois` is provided, reorders the outer keys to match the requested POI id sequence
+  - keeps each POI object's inner `id` unchanged
+  - publishes the payload to `/mapping/cmd_pois` as `std_msgs/String`
+- `tinynav nav stop`
+  - stops the tmux-managed navigation workflow inside the container
