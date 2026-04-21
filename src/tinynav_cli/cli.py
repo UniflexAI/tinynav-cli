@@ -1008,7 +1008,8 @@ def run_nav_go(command: NavGoCommand) -> int:
         print(f"   👉 {exc}")
         return 1
     payload_json = json.dumps(payload, separators=(",", ":"))
-    msg_arg = shlex.quote(f"{{data: {payload_json}}}")
+    ros_msg_yaml = json.dumps({"data": payload_json}, separators=(",", ":"))
+    msg_arg = shlex.quote(ros_msg_yaml)
     result = _docker_exec_output(
         command.container_name,
         "source /opt/ros/*/setup.bash >/dev/null 2>&1 && "
