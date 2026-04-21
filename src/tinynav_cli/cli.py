@@ -84,7 +84,6 @@ class NavStartCommand:
 class NavGoCommand:
     """Publish POIs for navigation."""
 
-    map_name: Annotated[str, tyro.conf.arg(name="map-name")]
     pois: str | None = None
     container_name: str = DEFAULT_CONTAINER_NAME
 
@@ -807,6 +806,17 @@ def _nav_status(container_name: str) -> tuple[str, list[str]]:
     return "running", []
 
 
+def _nav_map_name(container_name: str) -> str | None:
+    result = _docker_exec_output(container_name, f"tmux show-environment -t {NAV_SESSION} TINYNAV_MAP_NAME")
+    if result.returncode != 0:
+        return None
+    line = (result.stdout or "").strip()
+    prefix = "TINYNAV_MAP_NAME="
+    if not line.startswith(prefix):
+        return None
+    return line[len(prefix):]
+
+
 def _map_status(container_name: str) -> str:
     nodes = _ros2_node_names(container_name)
     if "/build_map_node" in nodes:
@@ -957,6 +967,7 @@ def run_nav_start(command: NavStartCommand) -> int:
             f"test -d {container_map_path}",
             f"tmux kill-session -t {NAV_SESSION} >/dev/null 2>&1 || true",
             f"tmux new-session -d -s {NAV_SESSION}",
+            f"tmux set-environment -t {NAV_SESSION} TINYNAV_MAP_NAME {command.map_name}",
             f"tmux split-window -t {NAV_SESSION} -h",
             f"tmux split-window -t {NAV_SESSION}:0.0 -v",
             f"tmux split-window -t {NAV_SESSION}:0.1 -v",
@@ -980,7 +991,16 @@ def run_nav_start(command: NavStartCommand) -> int:
 def run_nav_go(command: NavGoCommand) -> int:
     if not _ensure_runtime_container(command.container_name):
         return 1
-    map_path = _maps_dir() / command.map_name
+    status, _ = _nav_status(command.container_name)
+    if status != "running":
+        print("❌ nav go is only allowed in running state")
+        print(f"   👉 current state: {status}")
+        return 1
+    map_name = _nav_map_name(command.container_name)
+    if map_name is None:
+        print("❌ Failed to resolve map name from the running nav session.")
+        return 1
+    map_path = _maps_dir() / map_name
     try:
         payload = _selected_cmd_pois(map_path, command.pois)
     except (FileNotFoundError, ValueError, KeyError) as exc:
@@ -988,7 +1008,8 @@ def run_nav_go(command: NavGoCommand) -> int:
         print(f"   👉 {exc}")
         return 1
     payload_json = json.dumps(payload, separators=(",", ":"))
-    msg_arg = shlex.quote(f"{{data: {payload_json}}}")
+    ros_msg_yaml = json.dumps({"data": payload_json}, separators=(",", ":"))
+    msg_arg = shlex.quote(ros_msg_yaml)
     result = _docker_exec_output(
         command.container_name,
         "source /opt/ros/*/setup.bash >/dev/null 2>&1 && "
@@ -1000,7 +1021,7 @@ def run_nav_go(command: NavGoCommand) -> int:
             print(f"   👉 {(result.stderr or result.stdout).strip()}")
         return 1
     print(f"✅ Published navigation POIs inside container {command.container_name}.")
-    print(f"   👉 map: {command.map_name}")
+    print(f"   👉 map: {map_name}")
     if command.pois is None:
         print("   👉 pois: all")
     else:
