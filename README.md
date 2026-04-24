@@ -14,6 +14,7 @@ pip install tinynav
 tinynav init
 tinynav doctor
 tinynav example
+tinynav tunnel [--serial <serial>]
 tinynav nav status
 tinynav nav start --map-name <map_name>
 tinynav nav go [--pois 2,1,0]
@@ -49,6 +50,7 @@ tinynav example
 - `tinynav init` prepares the container environment and builds models.
 - `tinynav doctor` prints a machine report for debugging.
 - `tinynav example` launches the rosbag example workflow inside the running container.
+- `tinynav tunnel [--serial <serial>]` requests a tunnel config from the Uniflex tunnel API, uses the local machine hostname as the default serial when omitted, ensures `cloudflared` is installed, runs the returned `install_command`, and saves the JSON response to `${XDG_DATA_HOME:-$HOME/.local/share}/tinynav/tunnel.json`.
 - `tinynav sensors` checks connected sensors inside the running container, including RealSense detection and whether a ROS 2 `looper` node is present.
 - `tinynav sensors --preview` launches the sensor preview workflow inside the running container via `/tinynav/scripts/run_sensors_preview.sh`.
 - `tinynav version` prints the CLI version.

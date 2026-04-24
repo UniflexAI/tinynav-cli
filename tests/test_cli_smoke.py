@@ -31,6 +31,7 @@ def test_root_help_runs() -> None:
     assert "init" in output_text(result)
     assert "doctor" in output_text(result)
     assert "example" in output_text(result)
+    assert "tunnel" in output_text(result)
 
 
 def test_init_help_runs() -> None:
@@ -50,6 +51,14 @@ def test_example_help_runs() -> None:
     result = run_cli("example", "--help")
     assert result.returncode == 0
     assert "container" in output_text(result).lower()
+
+
+def test_tunnel_help_runs() -> None:
+    result = run_cli("tunnel", "--help")
+    assert result.returncode == 0
+    text = output_text(result).lower()
+    assert "serial" in text
+    assert "default" in text
 
 
 def test_map_help_runs() -> None:

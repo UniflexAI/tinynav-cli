@@ -11,6 +11,8 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -38,11 +40,22 @@ MAP_RECORD_SESSION = "tinynav_map_record"
 MAP_BUILD_SESSION = "tinynav_map_build"
 MAP_EDIT_POIS_SESSION = "tinynav_map_edit_pois"
 NAV_SESSION = "tinynav_nav"
+TUNNEL_API_URL = "https://calqyoxlwnfdkfjuapej.supabase.co/functions/v1/clever-action"
+TUNNEL_API_AUTH = (
+    "Bearer "
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhbHF5b3hsd25m"
+    "ZGtmanVhcGVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMjgwNjgsImV4cCI6MjA5MjYwNDA2OH0."
+    "SA7ME0H5xbipC-Vx-rbexSSmLXOyTHLqCdqVYxR7hy0"
+)
 
 
 def _default_workspace_dir() -> str:
     data_home = Path(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")))
     return str(data_home / "tinynav")
+
+
+def _default_tunnel_serial() -> str:
+    return platform.node()
 
 
 @dataclass
@@ -93,6 +106,13 @@ class ExampleCommand:
     """Run the rosbag example workflow inside the tinynav container."""
 
     container_name: str = DEFAULT_CONTAINER_NAME
+
+
+@dataclass
+class TunnelCommand:
+    """Create a TinyNav tunnel config and save it locally."""
+
+    serial: str = field(default_factory=_default_tunnel_serial)
 
 
 @dataclass
@@ -177,10 +197,11 @@ Init = Annotated[InitCommand, tyro.conf.subcommand(name="init")]
 Doctor = Annotated[DoctorCommand, tyro.conf.subcommand(name="doctor")]
 Nav = Annotated[NavCommand, tyro.conf.subcommand(name="nav")]
 Example = Annotated[ExampleCommand, tyro.conf.subcommand(name="example")]
+Tunnel = Annotated[TunnelCommand, tyro.conf.subcommand(name="tunnel")]
 Version = Annotated[VersionCommand, tyro.conf.subcommand(name="version")]
 Map = Annotated[MapCommand, tyro.conf.subcommand(name="map")]
 Sensors = Annotated[SensorsCommand, tyro.conf.subcommand(name="sensors")]
-Command = Union[Init, Doctor, Nav, Example, Version, Map, Sensors]
+Command = Union[Init, Doctor, Nav, Example, Tunnel, Version, Map, Sensors]
 
 
 @dataclass
@@ -895,6 +916,76 @@ def _container_rosbags_dir() -> Path:
     return Path(CONTAINER_WORKSPACE_DIR) / "rosbags"
 
 
+def _tunnel_json_path() -> Path:
+    return _workspace_data_dir() / "tunnel.json"
+
+
+def _request_tunnel(serial: str) -> dict[str, object]:
+    payload = json.dumps({"serial": serial}).encode("utf-8")
+    request = urllib.request.Request(
+        TUNNEL_API_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": TUNNEL_API_AUTH,
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30.0) as response:
+        body = response.read().decode("utf-8")
+    data = json.loads(body)
+    if not isinstance(data, dict):
+        raise ValueError("tunnel API response must be a JSON object")
+    return data
+
+
+def _cloudflared_download_url() -> str:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        arch = "amd64"
+    elif machine in {"aarch64", "arm64"}:
+        arch = "arm64"
+    else:
+        raise ValueError(f"unsupported architecture for cloudflared install: {platform.machine()}")
+    return f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}"
+
+
+def _ensure_cloudflared() -> None:
+    if shutil.which("cloudflared") is not None:
+        return
+    if shutil.which("sudo") is None:
+        raise RuntimeError("cloudflared is missing and sudo is not available for installation")
+    downloader = shutil.which("curl")
+    if downloader is not None:
+        download_command = f"{shlex.quote(downloader)} -L --fail {shlex.quote(_cloudflared_download_url())} -o /tmp/cloudflared"
+    else:
+        downloader = shutil.which("wget")
+        if downloader is None:
+            raise RuntimeError("cloudflared is missing and neither curl nor wget is available for installation")
+        download_command = f"{shlex.quote(downloader)} -O /tmp/cloudflared {shlex.quote(_cloudflared_download_url())}"
+    install_command = " && ".join([
+        "set -e",
+        "rm -f /tmp/cloudflared",
+        download_command,
+        "chmod +x /tmp/cloudflared",
+        "sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared",
+        "rm -f /tmp/cloudflared",
+    ])
+    result = _run(["bash", "-lc", install_command], timeout=180.0)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"failed to install cloudflared: {output}")
+    if shutil.which("cloudflared") is None:
+        raise RuntimeError("cloudflared install completed but binary is still not on PATH")
+
+
+def _run_tunnel_install_command(install_command: str) -> None:
+    result = _run(["bash", "-lc", install_command], timeout=180.0)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"failed to run install_command: {output}")
+
+
 def _format_size(num_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(num_bytes)
@@ -1292,6 +1383,39 @@ def run_example(command: ExampleCommand) -> int:
     return 0
 
 
+def run_tunnel(command: TunnelCommand) -> int:
+    try:
+        data = _request_tunnel(command.serial)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+        print("❌ Failed to create TinyNav tunnel config.")
+        print(f"   👉 {exc}")
+        return 1
+
+    install_command = data.get("install_command")
+    if not isinstance(install_command, str) or not install_command.strip():
+        print("❌ Tunnel API response is missing install_command.")
+        return 1
+
+    try:
+        _ensure_cloudflared()
+        _run_tunnel_install_command(install_command)
+    except RuntimeError as exc:
+        print("❌ Failed to install TinyNav tunnel.")
+        print(f"   👉 {exc}")
+        return 1
+
+    tunnel_path = _tunnel_json_path()
+    tunnel_path.parent.mkdir(parents=True, exist_ok=True)
+    tunnel_path.write_text(json.dumps(data, indent=2) + "\n")
+    print(f"✅ Installed TinyNav tunnel for serial {command.serial}.")
+    print(f"   👉 file: {tunnel_path}")
+    if isinstance(data.get("hostname"), str):
+        print(f"   👉 hostname: {data['hostname']}")
+    if isinstance(data.get("ssh_command"), str):
+        print(f"   👉 ssh: {data['ssh_command']}")
+    return 0
+
+
 def run_doctor(command: DoctorCommand) -> int:
     results = _collect_prerequisite_results()
     failures = sum(1 for result in results if not result.ok)
@@ -1357,6 +1481,8 @@ def run(command: Command) -> int:
             return run_nav_stop(command)
         case ExampleCommand():
             return run_example(command)
+        case TunnelCommand():
+            return run_tunnel(command)
         case VersionCommand():
             return run_version(command)
         case MapStatusCommand():
