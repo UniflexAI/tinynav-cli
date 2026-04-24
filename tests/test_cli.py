@@ -8,7 +8,7 @@ from tinynav_cli.version import __version__
 
 
 def test_version() -> None:
-    assert __version__ == "0.0.14"
+    assert __version__ == "0.0.15"
 
 
 def test_parse_poi_selection() -> None:
