@@ -980,7 +980,12 @@ def _ensure_cloudflared() -> None:
 
 
 def _run_tunnel_install_command(install_command: str) -> None:
-    result = _run(["bash", "-lc", install_command], timeout=180.0)
+    patched_command = install_command.replace(
+        "cloudflared service install ",
+        "cloudflared service install --protocol http2 ",
+        1,
+    )
+    result = _run(["bash", "-lc", patched_command], timeout=180.0)
     if result.returncode != 0:
         output = result.stderr.strip() or result.stdout.strip() or "command failed"
         raise RuntimeError(f"failed to run install_command: {output}")

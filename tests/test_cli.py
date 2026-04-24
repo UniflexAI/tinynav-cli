@@ -153,3 +153,28 @@ def test_tunnel_command_defaults_serial_to_hostname(monkeypatch) -> None:
     command = cli.TunnelCommand()
 
     assert command.serial == cli.platform.node()
+
+
+def test_run_tunnel_install_command_forces_http2(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, timeout=None):
+        captured["command"] = command
+        captured["timeout"] = timeout
+        return Result()
+
+    monkeypatch.setattr(cli, "_run", fake_run)
+
+    cli._run_tunnel_install_command("sudo cloudflared service install 'token'")
+
+    assert captured["command"] == [
+        "bash",
+        "-lc",
+        "sudo cloudflared service install --protocol http2 'token'",
+    ]
+    assert captured["timeout"] == 180.0
