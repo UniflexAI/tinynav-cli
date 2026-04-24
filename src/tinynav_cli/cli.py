@@ -980,15 +980,43 @@ def _ensure_cloudflared() -> None:
 
 
 def _run_tunnel_install_command(install_command: str) -> None:
-    patched_command = install_command.replace(
-        "cloudflared service install ",
-        "cloudflared service install --protocol http2 ",
-        1,
-    )
-    result = _run(["bash", "-lc", patched_command], timeout=180.0)
+    result = _run(["bash", "-lc", install_command], timeout=180.0)
     if result.returncode != 0:
         output = result.stderr.strip() or result.stdout.strip() or "command failed"
         raise RuntimeError(f"failed to run install_command: {output}")
+
+
+def _cloudflared_token_from_install_command(install_command: str) -> str:
+    parts = shlex.split(install_command)
+    if not parts:
+        raise ValueError("install_command is empty")
+    token = parts[-1]
+    if token.startswith("-"):
+        raise ValueError("install_command token is missing")
+    return token
+
+
+def _write_cloudflared_override(token: str) -> None:
+    override_dir = "/etc/systemd/system/cloudflared.service.d"
+    override_path = f"{override_dir}/override.conf"
+    override_body = "\n".join([
+        "[Service]",
+        "TimeoutStartSec=120",
+        "ExecStart=",
+        f"ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel run --protocol http2 --token {shlex.quote(token)}",
+        "",
+    ])
+    command = " && ".join([
+        "set -e",
+        f"sudo mkdir -p {shlex.quote(override_dir)}",
+        f"cat <<'EOF' | sudo tee {shlex.quote(override_path)} >/dev/null\n{override_body}EOF",
+        "sudo systemctl daemon-reload",
+        "sudo systemctl restart cloudflared",
+    ])
+    result = _run(["bash", "-lc", command], timeout=180.0)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"failed to write cloudflared override: {output}")
 
 
 def _format_size(num_bytes: int) -> str:
@@ -1404,8 +1432,13 @@ def run_tunnel(command: TunnelCommand) -> int:
     try:
         _ensure_cloudflared()
         _run_tunnel_install_command(install_command)
+        _write_cloudflared_override(_cloudflared_token_from_install_command(install_command))
     except RuntimeError as exc:
         print("❌ Failed to install TinyNav tunnel.")
+        print(f"   👉 {exc}")
+        return 1
+    except ValueError as exc:
+        print("❌ Failed to configure TinyNav tunnel.")
         print(f"   👉 {exc}")
         return 1
 

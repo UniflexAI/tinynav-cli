@@ -107,6 +107,8 @@ def test_run_tunnel_saves_response_json(monkeypatch, tmp_path, capsys) -> None:
     calls: list[tuple[str, str | None]] = []
     monkeypatch.setattr(cli, "_ensure_cloudflared", lambda: calls.append(("ensure", None)))
     monkeypatch.setattr(cli, "_run_tunnel_install_command", lambda command: calls.append(("run", command)))
+    monkeypatch.setattr(cli, "_cloudflared_token_from_install_command", lambda command: "token")
+    monkeypatch.setattr(cli, "_write_cloudflared_override", lambda token: calls.append(("override", token)))
 
     result = cli.run_tunnel(TunnelCommand(serial="test-nx02"))
 
@@ -115,6 +117,7 @@ def test_run_tunnel_saves_response_json(monkeypatch, tmp_path, capsys) -> None:
     assert calls == [
         ("ensure", None),
         ("run", "sudo cloudflared service install 'token'"),
+        ("override", "token"),
     ]
     out = capsys.readouterr().out
     assert "test-nx02" in out
@@ -149,13 +152,25 @@ def test_run_tunnel_reports_install_failure(monkeypatch, capsys) -> None:
     assert "Failed to install TinyNav tunnel" in capsys.readouterr().out
 
 
+def test_run_tunnel_reports_override_parse_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "_request_tunnel", lambda serial: {"install_command": "sudo cloudflared service install 'token'"})
+    monkeypatch.setattr(cli, "_ensure_cloudflared", lambda: None)
+    monkeypatch.setattr(cli, "_run_tunnel_install_command", lambda command: None)
+    monkeypatch.setattr(cli, "_cloudflared_token_from_install_command", lambda command: (_ for _ in ()).throw(ValueError("bad token")))
+
+    result = cli.run_tunnel(TunnelCommand(serial="test-nx02"))
+
+    assert result == 1
+    assert "Failed to configure TinyNav tunnel" in capsys.readouterr().out
+
+
 def test_tunnel_command_defaults_serial_to_hostname(monkeypatch) -> None:
     command = cli.TunnelCommand()
 
     assert command.serial == cli.platform.node()
 
 
-def test_run_tunnel_install_command_forces_http2(monkeypatch) -> None:
+def test_run_tunnel_install_command_runs_original_command(monkeypatch) -> None:
     captured = {}
 
     class Result:
@@ -175,6 +190,40 @@ def test_run_tunnel_install_command_forces_http2(monkeypatch) -> None:
     assert captured["command"] == [
         "bash",
         "-lc",
-        "sudo cloudflared service install --protocol http2 'token'",
+        "sudo cloudflared service install 'token'",
     ]
+    assert captured["timeout"] == 180.0
+
+
+def test_cloudflared_token_from_install_command() -> None:
+    token = cli._cloudflared_token_from_install_command("sudo cloudflared service install 'token-value'")
+
+    assert token == "token-value"
+
+
+def test_write_cloudflared_override_writes_http2_systemd_override(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, timeout=None):
+        captured["command"] = command
+        captured["timeout"] = timeout
+        return Result()
+
+    monkeypatch.setattr(cli, "_run", fake_run)
+
+    cli._write_cloudflared_override("token-value")
+
+    assert captured["command"][0:2] == ["bash", "-lc"]
+    shell = captured["command"][2]
+    assert "sudo mkdir -p /etc/systemd/system/cloudflared.service.d" in shell
+    assert "TimeoutStartSec=120" in shell
+    assert "ExecStart=" in shell
+    assert "ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel run --protocol http2 --token token-value" in shell
+    assert "sudo systemctl daemon-reload" in shell
+    assert "sudo systemctl restart cloudflared" in shell
     assert captured["timeout"] == 180.0
