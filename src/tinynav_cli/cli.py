@@ -935,6 +935,53 @@ def _request_tunnel(serial: str) -> dict[str, object]:
     return data
 
 
+def _cloudflared_download_url() -> str:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        arch = "amd64"
+    elif machine in {"aarch64", "arm64"}:
+        arch = "arm64"
+    else:
+        raise ValueError(f"unsupported architecture for cloudflared install: {platform.machine()}")
+    return f"https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{arch}"
+
+
+def _ensure_cloudflared() -> None:
+    if shutil.which("cloudflared") is not None:
+        return
+    if shutil.which("sudo") is None:
+        raise RuntimeError("cloudflared is missing and sudo is not available for installation")
+    downloader = shutil.which("curl")
+    if downloader is not None:
+        download_command = f"{shlex.quote(downloader)} -L --fail {shlex.quote(_cloudflared_download_url())} -o /tmp/cloudflared"
+    else:
+        downloader = shutil.which("wget")
+        if downloader is None:
+            raise RuntimeError("cloudflared is missing and neither curl nor wget is available for installation")
+        download_command = f"{shlex.quote(downloader)} -O /tmp/cloudflared {shlex.quote(_cloudflared_download_url())}"
+    install_command = " && ".join([
+        "set -e",
+        "rm -f /tmp/cloudflared",
+        download_command,
+        "chmod +x /tmp/cloudflared",
+        "sudo install -m 0755 /tmp/cloudflared /usr/local/bin/cloudflared",
+        "rm -f /tmp/cloudflared",
+    ])
+    result = _run(["bash", "-lc", install_command], timeout=180.0)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"failed to install cloudflared: {output}")
+    if shutil.which("cloudflared") is None:
+        raise RuntimeError("cloudflared install completed but binary is still not on PATH")
+
+
+def _run_tunnel_install_command(install_command: str) -> None:
+    result = _run(["bash", "-lc", install_command], timeout=180.0)
+    if result.returncode != 0:
+        output = result.stderr.strip() or result.stdout.strip() or "command failed"
+        raise RuntimeError(f"failed to run install_command: {output}")
+
+
 def _format_size(num_bytes: int) -> str:
     units = ["B", "KB", "MB", "GB", "TB"]
     size = float(num_bytes)
@@ -1333,9 +1380,6 @@ def run_example(command: ExampleCommand) -> int:
 
 
 def run_tunnel(command: TunnelCommand) -> int:
-    tunnel_path = _tunnel_json_path()
-    tunnel_path.parent.mkdir(parents=True, exist_ok=True)
-
     try:
         data = _request_tunnel(command.serial)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
@@ -1343,8 +1387,23 @@ def run_tunnel(command: TunnelCommand) -> int:
         print(f"   👉 {exc}")
         return 1
 
+    install_command = data.get("install_command")
+    if not isinstance(install_command, str) or not install_command.strip():
+        print("❌ Tunnel API response is missing install_command.")
+        return 1
+
+    try:
+        _ensure_cloudflared()
+        _run_tunnel_install_command(install_command)
+    except RuntimeError as exc:
+        print("❌ Failed to install TinyNav tunnel.")
+        print(f"   👉 {exc}")
+        return 1
+
+    tunnel_path = _tunnel_json_path()
+    tunnel_path.parent.mkdir(parents=True, exist_ok=True)
     tunnel_path.write_text(json.dumps(data, indent=2) + "\n")
-    print(f"✅ Saved TinyNav tunnel config for serial {command.serial}.")
+    print(f"✅ Installed TinyNav tunnel for serial {command.serial}.")
     print(f"   👉 file: {tunnel_path}")
     if isinstance(data.get("hostname"), str):
         print(f"   👉 hostname: {data['hostname']}")
