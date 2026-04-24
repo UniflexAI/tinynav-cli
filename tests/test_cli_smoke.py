@@ -58,6 +58,7 @@ def test_tunnel_help_runs() -> None:
     assert result.returncode == 0
     text = output_text(result).lower()
     assert "serial" in text
+    assert "default" in text
 
 
 def test_map_help_runs() -> None:

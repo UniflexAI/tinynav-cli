@@ -54,6 +54,10 @@ def _default_workspace_dir() -> str:
     return str(data_home / "tinynav")
 
 
+def _default_tunnel_serial() -> str:
+    return platform.node()
+
+
 @dataclass
 class InitCommand:
     """Initialize the local TinyNav CLI workspace."""
@@ -108,7 +112,7 @@ class ExampleCommand:
 class TunnelCommand:
     """Create a TinyNav tunnel config and save it locally."""
 
-    serial: str
+    serial: str = field(default_factory=_default_tunnel_serial)
 
 
 @dataclass

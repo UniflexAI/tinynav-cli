@@ -147,3 +147,9 @@ def test_run_tunnel_reports_install_failure(monkeypatch, capsys) -> None:
 
     assert result == 1
     assert "Failed to install TinyNav tunnel" in capsys.readouterr().out
+
+
+def test_tunnel_command_defaults_serial_to_hostname(monkeypatch) -> None:
+    command = cli.TunnelCommand()
+
+    assert command.serial == cli.platform.node()
