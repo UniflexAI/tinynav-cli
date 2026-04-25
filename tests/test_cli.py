@@ -108,7 +108,11 @@ def test_run_tunnel_saves_response_json(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setattr(cli, "_ensure_cloudflared", lambda: calls.append(("ensure", None)))
     monkeypatch.setattr(cli, "_run_tunnel_install_command", lambda command: calls.append(("run", command)))
     monkeypatch.setattr(cli, "_cloudflared_token_from_install_command", lambda command: "token")
-    monkeypatch.setattr(cli, "_write_cloudflared_override", lambda token: calls.append(("override", token)))
+    monkeypatch.setattr(
+        cli,
+        "_write_cloudflared_override",
+        lambda token, restart_service=True: calls.append(("override", f"{token}:{restart_service}")),
+    )
 
     result = cli.run_tunnel(TunnelCommand(serial="test-nx02"))
 
@@ -116,8 +120,8 @@ def test_run_tunnel_saves_response_json(monkeypatch, tmp_path, capsys) -> None:
     assert json.loads((tmp_path / "tunnel.json").read_text()) == payload
     assert calls == [
         ("ensure", None),
+        ("override", "token:False"),
         ("run", "sudo cloudflared service install 'token'"),
-        ("override", "token"),
     ]
     out = capsys.readouterr().out
     assert "test-nx02" in out
@@ -154,8 +158,6 @@ def test_run_tunnel_reports_install_failure(monkeypatch, capsys) -> None:
 
 def test_run_tunnel_reports_override_parse_failure(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_request_tunnel", lambda serial: {"install_command": "sudo cloudflared service install 'token'"})
-    monkeypatch.setattr(cli, "_ensure_cloudflared", lambda: None)
-    monkeypatch.setattr(cli, "_run_tunnel_install_command", lambda command: None)
     monkeypatch.setattr(cli, "_cloudflared_token_from_install_command", lambda command: (_ for _ in ()).throw(ValueError("bad token")))
 
     result = cli.run_tunnel(TunnelCommand(serial="test-nx02"))
@@ -227,3 +229,25 @@ def test_write_cloudflared_override_writes_http2_systemd_override(monkeypatch) -
     assert "sudo systemctl daemon-reload" in shell
     assert "sudo systemctl restart cloudflared" in shell
     assert captured["timeout"] == 180.0
+
+
+def test_write_cloudflared_override_can_skip_restart(monkeypatch) -> None:
+    captured = {}
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command, timeout=None):
+        captured["command"] = command
+        captured["timeout"] = timeout
+        return Result()
+
+    monkeypatch.setattr(cli, "_run", fake_run)
+
+    cli._write_cloudflared_override("token-value", restart_service=False)
+
+    shell = captured["command"][2]
+    assert "sudo systemctl daemon-reload" in shell
+    assert "sudo systemctl restart cloudflared" not in shell
